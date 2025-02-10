@@ -1,180 +1,264 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <title>Three.js XR Optimized Example</title>
-</head>
-<body style="margin:0; overflow:hidden;">
-<script type="module">
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
-import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/VRButton.js';
-// (You could do ARButton for AR, but let's assume Quest VR usage.)
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Three.js XR - Soft Colors & Slower Movement</title>
+  </head>
+  <body style="margin:0; padding:0; overflow:hidden;">
+    <script type="module">
+      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
+      import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/VRButton.js';
+      // If you want AR:
+      // import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/ARButton.js';
 
-let scene, camera, renderer;
-let clock;
-let analyser, sound;
+      /****************************************************
+       * Configuration
+       ****************************************************/
+      const numLayers = 16;      // fewer layers => better performance
+      const numPoints = 24;      // radial shape resolution
+      const angleStep = 360 / numPoints;
 
-const numLayers = 20;          // fewer for performance
-const numPoints = 12;          // fewer points for radial
-const angleStep = 360 / numPoints;
+      // Soft color palette
+      const softPalette = [
+        "#b2dfdb", // teal
+        "#ffe0b2", // peach
+        "#c5cae9", // lavender
+        "#ffccbc", // coral
+        "#e1bee7"  // pink
+      ];
 
-// Store data about each layer’s geometry
-let layerInfos = [];
+      // We'll alternate shape types: radial or squares
+      // We'll store data in an array so we can update each layer in the loop
+      let layersData = [];
 
-init();
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
+      // Audio-related
+      let analyser, sound;
 
-  camera = new THREE.PerspectiveCamera(
-    70,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000
-  );
-  // In VR, the headset will override this, but let's set a default
-  camera.position.set(0, 1.6, 3);
-  scene.add(camera);
+      // Three.js core
+      let scene, camera, renderer;
+      let clock;
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+      init();
 
-  // VR Button
-  document.body.appendChild(VRButton.createButton(renderer));
+      function init() {
+        /****************************************************
+         * Scene and Camera
+         ****************************************************/
+        scene = new THREE.Scene();
+        // Black background
+        scene.background = new THREE.Color(0x000000);
 
-  clock = new THREE.Clock();
+        // For VR, the headset pose will override any manual position
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+        camera.position.set(0, 1.6, 3); // only relevant if VR is not active yet
+        scene.add(camera);
 
-  // Audio Setup (optional if you have an audio file)
-  const listener = new THREE.AudioListener();
-  camera.add(listener);
-  sound = new THREE.Audio(listener);
-  const audioLoader = new THREE.AudioLoader();
-  audioLoader.load('StanfordOutpatient3piano.mp3', (buffer) => {
-    sound.setBuffer(buffer);
-    sound.setLoop(true);
-  });
-  analyser = new THREE.AudioAnalyser(sound, 512);
+        /****************************************************
+         * Renderer
+         ****************************************************/
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        // Black clear color
+        renderer.setClearColor(0x000000, 1);
+        document.body.appendChild(renderer.domElement);
 
-  // Create layers ONCE
-  for (let i = 0; i < numLayers; i++) {
-    const group = new THREE.Group();
-    scene.add(group);
+        // VR Button (for Quest). If AR, use ARButton instead.
+        document.body.appendChild(VRButton.createButton(renderer));
+        // document.body.appendChild(ARButton.createButton(renderer));
 
-    // Build a radial line geometry
-    // We have numPoints + 1 (closing the shape)
-    const vertexCount = numPoints + 1;
-    const positions = new Float32Array(vertexCount * 3);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        clock = new THREE.Clock();
 
-    const material = new THREE.LineBasicMaterial({
-      color: new THREE.Color(`hsl(${(i * 30) % 360}, 80%, 50%)`),
-    });
-    const line = new THREE.LineLoop(geometry, material);
-    group.add(line);
+        /****************************************************
+         * Audio
+         ****************************************************/
+        const listener = new THREE.AudioListener();
+        camera.add(listener);
 
-    // Store references for updating
-    layerInfos.push({
-      group,
-      geometry,
-      positions,
-      positionAttr: geometry.getAttribute('position'),
-      rotationOffset: (Math.random() - 0.5) * 0.5,
-    });
-  }
+        sound = new THREE.Audio(listener);
+        const audioLoader = new THREE.AudioLoader();
+        audioLoader.load("StanfordOutpatient3piano.mp3", (buffer) => {
+          sound.setBuffer(buffer);
+          sound.setLoop(true);
+          // Must be triggered by user gesture or after session starts
+        });
 
-  window.addEventListener('resize', onWindowResize);
-  renderer.setAnimationLoop(render);
-}
+        // Fewer FFT bins => lighter processing
+        analyser = new THREE.AudioAnalyser(sound, 512);
 
-// Helper to get frequency range average
-function getFreqRange(analyser, minF, maxF) {
-  const data = analyser.getFrequencyData();
-  const sampleRate = 44100;
-  const binCount = analyser.analyser.fftSize;
-  const freqStep = sampleRate / binCount;
-  let startIndex = Math.floor(minF / freqStep);
-  let endIndex = Math.floor(maxF / freqStep);
-  startIndex = Math.max(startIndex, 0);
-  endIndex = Math.min(endIndex, data.length - 1);
-  let sum = 0, count = 0;
-  for (let i = startIndex; i <= endIndex; i++) {
-    sum += data[i];
-    count++;
-  }
-  return count > 0 ? sum / count : 0;
-}
+        /****************************************************
+         * Build Layers (Retained Mode)
+         ****************************************************/
+        for (let i = 0; i < numLayers; i++) {
+          const group = new THREE.Group();
+          scene.add(group);
 
-function render() {
-  const delta = clock.getDelta();
-  const elapsed = clock.getElapsedTime();
+          const rotationOffset = (Math.random() - 0.5) * 0.005; // small => slow rotation
+          const waveOffsetX = (Math.random() - 0.5) * 0.5;      // slight random offset
+          const waveOffsetZ = -2 - i * 0.4;                     // push each layer further back
 
-  if (analyser) {
-    const bass = getFreqRange(analyser, 20, 140);
-    const mid = getFreqRange(analyser, 140, 1000);
-    const treble = getFreqRange(analyser, 1000, 20000);
+          // We'll store geometry references so we can update them in the render loop
+          let shapeType = (i % 2 === 0) ? "radial" : "squares";
+          let geometry, positions, positionAttr = null;
+          let squares = [];
 
-    // Example amplitude from mid
-    let amplitude = mid;
-    let intensity = THREE.MathUtils.mapLinear(amplitude, 0, 255, 0.03, 0.25);
-    let sizeVar = THREE.MathUtils.mapLinear(treble, 0, 255, 0.5, 5);
+          if (shapeType === "radial") {
+            // Create one radial line geometry
+            const vertexCount = numPoints + 1; // close shape
+            positions = new Float32Array(vertexCount * 3);
+            geometry = new THREE.BufferGeometry();
+            positionAttr = new THREE.BufferAttribute(positions, 3);
+            geometry.setAttribute("position", positionAttr);
 
-    // Update each layer without removing/adding geometry
-    layerInfos.forEach((info, i) => {
-      const { group, positions, positionAttr, rotationOffset } = info;
+            const col = new THREE.Color(softPalette[i % softPalette.length]);
+            const mat = new THREE.LineBasicMaterial({ color: col });
 
-      // Just rotate the group
-      group.rotation.z = elapsed * rotationOffset;
+            const line = new THREE.LineLoop(geometry, mat);
+            group.add(line);
 
-      // Slight position wave
-      group.position.x = Math.sin(elapsed * 0.01 + i) * 1;
-      group.position.z = -2 - i * 0.5;
+          } else {
+            // "squares"
+            // We'll create a small set of squares, not re-building them each frame
+            // For example, create 4 squares
+            for (let s = 0; s < 4; s++) {
+              let size = 0.5;
+              let geo = new THREE.PlaneGeometry(size, size);
+              let col = new THREE.Color(softPalette[i % softPalette.length]);
+              let mat = new THREE.MeshBasicMaterial({ color: col, wireframe: true });
+              let mesh = new THREE.Mesh(geo, mat);
+              mesh.position.set(0, 0, 0);
+              mesh.rotation.z = s * 0.5; // small incremental rotation
+              group.add(mesh);
+              squares.push(mesh);
+            }
+          }
 
-      // Frequency-based radius
-      let freqIndex = Math.floor(THREE.MathUtils.mapLinear(i, 0, numLayers, 0, 511));
-      let data = analyser.getFrequencyData();
-      let spectrumVal = data[freqIndex];
-      let baseRadius = THREE.MathUtils.mapLinear(spectrumVal, 0, 255, 50, 180);
-      let radius = baseRadius * intensity;
+          layersData.push({
+            group,
+            shapeType,
+            rotationOffset,
+            waveOffsetX,
+            waveOffsetZ,
+            geometry,
+            positions,
+            positionAttr,
+            squares
+          });
+        }
 
-      // Update radial shape positions
-      let idx = 0;
-      for (let angle = 0; angle < 360; angle += 360 / numPoints) {
-        let angleRad = THREE.MathUtils.degToRad(angle);
-        // offset
-        let rOffset = (Math.random() - 0.5) * 10; // or some noise
-        let finalR = radius + rOffset;
-        positions[idx++] = Math.cos(angleRad) * finalR;
-        positions[idx++] = Math.sin(angleRad) * finalR;
-        positions[idx++] = 0;
+        /****************************************************
+         * Events
+         ****************************************************/
+        window.addEventListener("resize", onWindowResize, false);
+
+        // Start XR loop
+        renderer.setAnimationLoop(render);
       }
-      // close shape by repeating first vertex
-      positions[idx++] = positions[0];
-      positions[idx++] = positions[1];
-      positions[idx++] = positions[2];
 
-      // Mark positions as updated
-      positionAttr.needsUpdate = true;
-    });
-  }
+      function render() {
+        const elapsed = clock.getElapsedTime();
 
-  renderer.render(scene, camera);
-}
+        // Low-impact frequency analysis
+        if (analyser) {
+          const bass = getFreqRange(analyser, 20, 140);
+          const mid = getFreqRange(analyser, 140, 1000);
+          const treble = getFreqRange(analyser, 1000, 20000);
 
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
+          // Subtle amplitude & size Variation
+          const amplitude = mid;
+          const intensity = THREE.MathUtils.mapLinear(amplitude, 0, 255, 0.01, 0.08);
+          const sizeVar = THREE.MathUtils.mapLinear(treble, 0, 255, 0.5, 2.0);
 
-// Optional user gesture to start audio
-window.addEventListener('pointerdown', () => {
-  if (sound && !sound.isPlaying) {
-    sound.play();
-  }
-});
-</script>
-</body>
+          // update each layer
+          layersData.forEach((data, i) => {
+            const { group, shapeType, rotationOffset, waveOffsetX, waveOffsetZ,
+                    geometry, positions, positionAttr, squares } = data;
+
+            // slow rotation
+            group.rotation.z = elapsed * rotationOffset * 2; // small multiplier if needed
+
+            // small wave motion
+            group.position.x = waveOffsetX + Math.sin(elapsed * 0.2 + i) * 0.1;
+            group.position.y = 0; // floor level
+            group.position.z = waveOffsetZ;
+
+            // pick freq val for this layer
+            const freqData = analyser.getFrequencyData();
+            let freqIndex = Math.floor(THREE.MathUtils.mapLinear(i, 0, numLayers, 0, freqData.length - 1));
+            let spectrumVal = freqData[freqIndex];
+            let baseRadius = THREE.MathUtils.mapLinear(spectrumVal, 0, 255, 10, 50);
+            let radius = baseRadius * intensity;
+
+            if (shapeType === "radial" && positionAttr) {
+              // Update radial line geometry
+              let idx = 0;
+              for (let angleDeg = 0; angleDeg < 360; angleDeg += angleStep) {
+                let angleRad = THREE.MathUtils.degToRad(angleDeg);
+                // smaller random offset => smoother shape
+                let rOffset = (Math.random() - 0.5) * 2;
+                let finalR = radius + rOffset;
+                positions[idx++] = Math.cos(angleRad) * finalR * sizeVar;
+                positions[idx++] = Math.sin(angleRad) * finalR * sizeVar;
+                positions[idx++] = 0;
+              }
+              // close shape
+              positions[idx++] = positions[0];
+              positions[idx++] = positions[1];
+              positions[idx++] = positions[2];
+
+              positionAttr.needsUpdate = true;
+
+            } else if (shapeType === "squares") {
+              // rotate squares gently
+              squares.forEach((sq, sIndex) => {
+                sq.rotation.z += 0.0005; // very slow spin
+                // scale based on radius
+                let s = (radius * 0.01 + 0.5) * sizeVar;
+                sq.scale.set(s, s, 1);
+              });
+            }
+          });
+        }
+
+        // Render
+        renderer.render(scene, camera);
+      }
+
+      /****************************************************
+       * Utility Functions
+       ****************************************************/
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      // Get average freq in [startFreq, endFreq]
+      function getFreqRange(analyser, minF, maxF) {
+        const data = analyser.getFrequencyData();
+        const sampleRate = 44100; // approximate
+        const fftSize = analyser.analyser.fftSize;
+        const freqStep = sampleRate / fftSize;
+
+        let startIndex = Math.floor(minF / freqStep);
+        let endIndex = Math.floor(maxF / freqStep);
+        startIndex = Math.max(0, startIndex);
+        endIndex = Math.min(data.length - 1, endIndex);
+
+        let sum = 0, count = 0;
+        for (let i = startIndex; i <= endIndex; i++) {
+          sum += data[i];
+          count++;
+        }
+        return count > 0 ? sum / count : 0;
+      }
+
+      // Optional: Play audio on pointerdown
+      window.addEventListener("pointerdown", () => {
+        if (sound && !sound.isPlaying) {
+          sound.play();
+        }
+      });
+    </script>
+  </body>
 </html>
