@@ -1,340 +1,524 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8"/>
-    <title>Three.js VR - Complex, Slow, Pastel Audio Reactive</title>
+    <meta charset="UTF-8" />
+    <title>Three.js VR - Layered, More Patterns & Details</title>
   </head>
   <body style="margin:0; padding:0; overflow:hidden;">
-    <!-- 
-      This example:
-        - Creates a "wavy" plane reacting to bass.
-        - Creates an InstancedMesh of spheres reacting to mid/treble.
-        - Uses pastel color palette, slow movement, black background.
-        - Retains geometry for performance (no re-creation each frame).
-    -->
     <script type="module">
-      /******************************************************
-       * Imports
-       ******************************************************/
-      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
-      import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/VRButton.js';
-      // If you want AR, use ARButton instead:
-      // import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/ARButton.js';
 
-      // Noise library for smooth wave displacement
-      import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.1/dist/esm/simplex-noise.js';
+    /*****************************************************
+     * 1) Imports
+     *****************************************************/
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
+    import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/VRButton.js';
+    // If AR is desired, swap import to ARButton
 
-      /******************************************************
-       * Configuration
-       ******************************************************/
-      // Plane geometry resolution
-      const planeSize = 80;          // overall width/height in scene units
-      const planeSegments = 100;     // higher => smoother wave but more vertices (~10k)
-      // Instanced spheres
-      const instanceCount = 50;      // number of floating spheres
-      // Pastel palette
-      const pastelPalette = [
-        "#b2dfdb", // teal
-        "#ffe0b2", // peach
-        "#c5cae9", // lavender
-        "#ffccbc", // coral
-        "#e1bee7"  // pink
-      ];
+    /*****************************************************
+     * 2) Configuration
+     *****************************************************/
+    const numLayers = 40;           // Number of layered shapes
+    const numPoints = 24;           // Points for radial/star shapes
+    const angleStep = 360 / numPoints;
+    // We define 5 shape types
+    const SHAPE_TYPES = ["chess", "radial", "squares", "star", "arcs"];
 
-      // We’ll have separate reactivity for bass, mid, treble
-      // to show more complexity.
-      let scene, camera, renderer;
-      let clock;
-      let analyser, sound;
+    // Soft pastel palette
+    const pastelPalette = [
+      "#b2dfdb", // teal
+      "#ffe0b2", // peach
+      "#c5cae9", // lavender
+      "#ffccbc", // coral
+      "#e1bee7"  // pink
+    ];
 
-      // For the wavy plane
-      let waveMesh, wavePositions, waveAttr;
-      let noiseGenerator;
+    let scene, camera, renderer;
+    let clock;
+    let analyser, sound;
 
-      // For the floating spheres (InstancedMesh)
-      let sphereMesh;
-      let sphereInfos = []; // store random offsets, speeds
+    // We'll store "layer data" so each layer can be updated
+    let layersData = [];
 
-      init();
+    init();
 
-      function init() {
-        /******************************************************
-         * Basic Scene Setup
-         ******************************************************/
-        scene = new THREE.Scene();
-        // Black background
-        scene.background = new THREE.Color(0x000000);
+    function init() {
+      /*****************************************************
+       * Scene & Camera
+       *****************************************************/
+      scene = new THREE.Scene();
+      // Black background
+      scene.background = new THREE.Color(0x000000);
 
-        camera = new THREE.PerspectiveCamera(
-          70,
-          window.innerWidth / window.innerHeight,
-          0.1,
-          1000
-        );
-        // In VR, device pose overrides this, but we set a default
-        camera.position.set(0, 1.6, 4);
-        scene.add(camera);
+      camera = new THREE.PerspectiveCamera(
+        70,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        1000
+      );
+      // For VR, device pose overrides this eventually, but let's set a default
+      camera.position.set(0, 1.6, 5);
+      scene.add(camera);
 
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-        // Make sure background is not transparent
-        renderer.setClearColor(0x000000, 1);
-        document.body.appendChild(renderer.domElement);
+      /*****************************************************
+       * Renderer
+       *****************************************************/
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      // Black background, no transparency
+      renderer.setClearColor(0x000000, 1);
+      document.body.appendChild(renderer.domElement);
 
-        // VR Button (Quest, etc.). If AR is desired, switch to ARButton.
-        document.body.appendChild(VRButton.createButton(renderer));
+      // VR Button
+      document.body.appendChild(VRButton.createButton(renderer));
 
-        clock = new THREE.Clock();
+      clock = new THREE.Clock();
 
-        /******************************************************
-         * Audio Setup
-         ******************************************************/
-        const listener = new THREE.AudioListener();
-        camera.add(listener);
+      /*****************************************************
+       * Audio Setup
+       *****************************************************/
+      const listener = new THREE.AudioListener();
+      camera.add(listener);
 
-        sound = new THREE.Audio(listener);
-        const audioLoader = new THREE.AudioLoader();
-        // Load your audio file. Adjust path if needed.
-        audioLoader.load('StanfordOutpatient3 piano.mp3', buffer => {
-          sound.setBuffer(buffer);
-          sound.setLoop(true);
-          // Must be triggered by user gesture or after XR session start
-        });
-        // Fewer bins => lighter on performance
-        analyser = new THREE.AudioAnalyser(sound, 512);
+      sound = new THREE.Audio(listener);
+      const audioLoader = new THREE.AudioLoader();
+      // Update path if needed
+      audioLoader.load("StanfordOutpatient3piano.mp3", (buffer) => {
+        sound.setBuffer(buffer);
+        sound.setLoop(true);
+      });
+      // Fewer bins => lighter performance
+      analyser = new THREE.AudioAnalyser(sound, 512);
 
-        // A single instance of Simplex noise
-        noiseGenerator = new SimplexNoise();
+      /*****************************************************
+       * Build Layers (One-time)
+       *****************************************************/
+      for (let i = 0; i < numLayers; i++) {
+        const shapeType = SHAPE_TYPES[Math.floor(Math.random() * SHAPE_TYPES.length)];
+        const group = new THREE.Group();
+        scene.add(group);
 
-        /******************************************************
-         * 1) Create a Wavy Plane
-         ******************************************************/
-        // This plane is centered around (0,0). We'll rotate it so we can see it from the front
-        const planeGeo = new THREE.PlaneGeometry(
-          planeSize,
-          planeSize,
-          planeSegments,
-          planeSegments
-        );
-        // We'll store a reference to its position buffer
-        wavePositions = planeGeo.attributes.position.array;
-        waveAttr = planeGeo.attributes.position;
-        // Rotate plane so +Y is up, using typical "floor" approach:
-        planeGeo.rotateX(-Math.PI / 2);
+        // Random position & rotation offset
+        const rotationSpeed = (Math.random() - 0.5) * 0.02;  // slow
+        const waveX = (Math.random() - 0.5) * 1.5;          // small offset
+        const waveY = (Math.random() - 0.5) * 1.5;
+        const waveZ = -3 - i * 0.3;                         // place layers in negative Z
 
-        // Use a soft color material. We'll pick from the pastel palette randomly.
-        let waveColor = new THREE.Color(pastelPalette[Math.floor(Math.random() * pastelPalette.length)]);
-        const planeMat = new THREE.MeshLambertMaterial({
-          color: waveColor,
-          side: THREE.DoubleSide
-        });
-        waveMesh = new THREE.Mesh(planeGeo, planeMat);
-        waveMesh.position.y = 0;  // at "ground" level
-        scene.add(waveMesh);
+        // We'll store references for updates:
+        let dataObj = {
+          shapeType,
+          group,
+          rotationSpeed,
+          basePos: new THREE.Vector3(waveX, waveY, waveZ),
+          squares: [],
+          chessGroup: null,
+          lineMesh: null,    // for radial/star/arcs
+          positions: null,   // Float32Array if line-based
+          positionAttr: null
+        };
 
-        /******************************************************
-         * 2) Lighting
-         ******************************************************/
-        // For Lambert materials, we need some lights
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-        dirLight.position.set(0, 10, 10);
-        scene.add(dirLight);
-
-        /******************************************************
-         * 3) Floating Spheres with InstancedMesh
-         ******************************************************/
-        // We'll create a single sphere geometry & a pastel material
-        // Then instance it multiple times
-        const sphereGeo = new THREE.SphereGeometry(0.3, 16, 16);
-        const sphereMat = new THREE.MeshLambertMaterial({
-          color: new THREE.Color(pastelPalette[0])
-        });
-        sphereMesh = new THREE.InstancedMesh(sphereGeo, sphereMat, instanceCount);
-        scene.add(sphereMesh);
-
-        // Each instance gets a transform & random data
-        for (let i = 0; i < instanceCount; i++) {
-          const matrix = new THREE.Matrix4();
-
-          // Random position near the plane
-          let x = (Math.random() - 0.5) * planeSize * 0.6;
-          let y = 0.5 + Math.random() * 2.0; // from 0.5 to 2.5
-          let z = (Math.random() - 0.5) * planeSize * 0.6;
-
-          // We store each sphere's velocity or offset
-          const data = {
-            offsetX: Math.random() * 100,
-            offsetZ: Math.random() * 100,
-            speed: 0.2 + Math.random() * 0.5
-          };
-          sphereInfos.push(data);
-
-          matrix.makeTranslation(x, y, z);
-          sphereMesh.setMatrixAt(i, matrix);
-        }
-        // We'll update their transforms each frame
-        sphereMesh.instanceMatrix.needsUpdate = true;
-
-        /******************************************************
-         * Events & Start Animation
-         ******************************************************/
-        window.addEventListener('resize', onWindowResize, false);
-        renderer.setAnimationLoop(render);
-
-        // Optional: Start audio on pointerdown
-        window.addEventListener("pointerdown", () => {
-          if (sound && !sound.isPlaying) {
-            sound.play();
-          }
-        });
+        // Build the shape
+        buildLayerShape(dataObj, i);
+        layersData.push(dataObj);
       }
 
-      function render() {
-        const elapsed = clock.getElapsedTime();
+      window.addEventListener("resize", onWindowResize, false);
+      // XR render loop
+      renderer.setAnimationLoop(render);
 
-        // 1) Analyze audio
+      // Optional: Start audio on pointerdown
+      window.addEventListener("pointerdown", () => {
+        if (!sound.isPlaying) {
+          sound.play();
+        }
+      });
+    }
+
+    /*****************************************************
+     * Build a layer's shape once
+     *****************************************************/
+    function buildLayerShape(dataObj, layerIndex) {
+      const { shapeType, group } = dataObj;
+
+      switch (shapeType) {
+        case "chess":
+          buildChessShape(dataObj, layerIndex);
+          break;
+        case "radial":
+          buildRadialShape(dataObj, layerIndex);
+          break;
+        case "squares":
+          buildSquaresShape(dataObj, layerIndex);
+          break;
+        case "star":
+          buildStarShape(dataObj, layerIndex);
+          break;
+        case "arcs":
+          buildArcsShape(dataObj, layerIndex);
+          break;
+      }
+    }
+
+    /*****************************************************
+     * Chessboard pattern (like the old code)
+     *****************************************************/
+    function buildChessShape(dataObj, layerIndex) {
+      const { group } = dataObj;
+
+      // Random rows & cols
+      let cols = THREE.MathUtils.randInt(2, 4);
+      let rows = THREE.MathUtils.randInt(2, 5);
+
+      // Two different pastel colors
+      let c1Index = Math.floor(Math.random() * pastelPalette.length);
+      let c2Index = Math.floor(Math.random() * pastelPalette.length);
+      while (c2Index === c1Index) {
+        c2Index = Math.floor(Math.random() * pastelPalette.length);
+      }
+      let color1 = new THREE.Color(pastelPalette[c1Index]);
+      let color2 = new THREE.Color(pastelPalette[c2Index]);
+
+      // Build sub-group
+      const chessGroup = new THREE.Group();
+      group.add(chessGroup);
+      dataObj.chessGroup = chessGroup;
+
+      let size = 3; // base size
+      let cellW = size / cols;
+      let cellH = size / rows;
+
+      let startX = -size / 2;
+      let startY = -size / 2;
+
+      for (let cx = 0; cx < cols; cx++) {
+        for (let ry = 0; ry < rows; ry++) {
+          let isColor1 = ((cx + ry) % 2 === 0);
+          let cellColor = isColor1 ? color1 : color2;
+
+          let geometry = new THREE.PlaneGeometry(cellW, cellH);
+          let material = new THREE.MeshBasicMaterial({ color: cellColor });
+          let mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(
+            startX + cx * cellW + cellW / 2,
+            startY + ry * cellH + cellH / 2,
+            0
+          );
+          // rotate so it faces camera
+          mesh.rotation.x = -Math.PI * 0.3; 
+          chessGroup.add(mesh);
+        }
+      }
+    }
+
+    /*****************************************************
+     * Radial shape (line loop)
+     *****************************************************/
+    function buildRadialShape(dataObj, layerIndex) {
+      const vertexCount = numPoints + 1; // close shape
+      const positions = new Float32Array(vertexCount * 3);
+      const geometry = new THREE.BufferGeometry();
+      const positionAttr = new THREE.BufferAttribute(positions, 3);
+      geometry.setAttribute("position", positionAttr);
+
+      // random pastel color
+      const colStr = pastelPalette[layerIndex % pastelPalette.length];
+      const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(colStr) });
+
+      const lineLoop = new THREE.LineLoop(geometry, mat);
+      dataObj.group.add(lineLoop);
+
+      dataObj.lineMesh = lineLoop;
+      dataObj.positions = positions;
+      dataObj.positionAttr = positionAttr;
+
+      // Initialize the shape (we'll update in frames)
+      for (let p = 0; p < vertexCount; p++) {
+        positions[p * 3 + 0] = 0;
+        positions[p * 3 + 1] = 0;
+        positions[p * 3 + 2] = 0;
+      }
+    }
+
+    /*****************************************************
+     * Rotating squares
+     *****************************************************/
+    function buildSquaresShape(dataObj, layerIndex) {
+      const { group, squares } = dataObj;
+      // We'll create a few squares
+      let count = 4;
+      for (let i = 0; i < count; i++) {
+        let size = 2.0;
+        let geo = new THREE.PlaneGeometry(size, size);
+        let colStr = pastelPalette[(layerIndex + i) % pastelPalette.length];
+        let mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colStr), wireframe: true });
+
+        let mesh = new THREE.Mesh(geo, mat);
+        // offset or rotate them a bit
+        mesh.rotation.z = i * 0.5;
+        group.add(mesh);
+
+        squares.push(mesh);
+      }
+    }
+
+    /*****************************************************
+     * Star shape (line loop)
+     * Similar to radial but with "spikes"
+     *****************************************************/
+    function buildStarShape(dataObj, layerIndex) {
+      // We'll define a star by alternating radius
+      // e.g. big radius, small radius, big radius...
+      const vertexCount = numPoints + 1; // close shape
+      const positions = new Float32Array(vertexCount * 3);
+      const geometry = new THREE.BufferGeometry();
+      const positionAttr = new THREE.BufferAttribute(positions, 3);
+      geometry.setAttribute("position", positionAttr);
+
+      const colStr = pastelPalette[layerIndex % pastelPalette.length];
+      const mat = new THREE.LineBasicMaterial({ color: colStr });
+
+      const lineLoop = new THREE.LineLoop(geometry, mat);
+      dataObj.group.add(lineLoop);
+
+      dataObj.lineMesh = lineLoop;
+      dataObj.positions = positions;
+      dataObj.positionAttr = positionAttr;
+
+      // Initialize (will update each frame)
+      for (let i = 0; i < vertexCount; i++) {
+        positions[i * 3 + 0] = 0;
+        positions[i * 3 + 1] = 0;
+        positions[i * 3 + 2] = 0;
+      }
+    }
+
+    /*****************************************************
+     * Arcs shape (spiral arcs)
+     * We build it as a line
+     *****************************************************/
+    function buildArcsShape(dataObj, layerIndex) {
+      // We'll do a line that arcs outward in a spiral
+      const spiralTurns = 2;
+      const vertexCount = numPoints * spiralTurns;
+      const positions = new Float32Array((vertexCount + 1) * 3);
+      const geometry = new THREE.BufferGeometry();
+      const positionAttr = new THREE.BufferAttribute(positions, 3);
+      geometry.setAttribute("position", positionAttr);
+
+      const colStr = pastelPalette[layerIndex % pastelPalette.length];
+      const mat = new THREE.LineBasicMaterial({ color: colStr });
+
+      const line = new THREE.Line(geometry, mat);
+      dataObj.group.add(line);
+
+      dataObj.lineMesh = line;
+      dataObj.positions = positions;
+      dataObj.positionAttr = positionAttr;
+
+      // Initialize
+      for (let i = 0; i < vertexCount + 1; i++) {
+        positions[i * 3] = 0;
+        positions[i * 3 + 1] = 0;
+        positions[i * 3 + 2] = 0;
+      }
+    }
+
+    /*****************************************************
+     * Render Loop
+     *****************************************************/
+    function render() {
+      const elapsed = clock.getElapsedTime();
+
+      // Audio analysis
+      if (analyser) {
         const bass = getFreqRange(analyser, 20, 140);
         const mid = getFreqRange(analyser, 140, 1000);
         const treble = getFreqRange(analyser, 1000, 20000);
 
-        // We’ll use:
-        // - Bass => wave displacement
-        // - Mid => sphere floating speeds
-        // - Treble => sphere scale variation
+        // We'll map them for shape transformations
+        const amplitude = mid; // example: mid for amplitude
+        const intensity = THREE.MathUtils.mapLinear(amplitude, 0, 255, 0.02, 0.2);
+        const sizeVariation = THREE.MathUtils.mapLinear(treble, 0, 255, 0.5, 2.5);
+        const bassFactor = THREE.MathUtils.mapLinear(bass, 0, 255, 0.5, 3);
 
-        // 2) Update the wavy plane
-        updateWavyPlane(elapsed, bass);
+        // We'll also get the raw freq data to pick per-layer
+        const freqData = analyser.getFrequencyData();
 
-        // 3) Update the floating spheres
-        updateFloatingSpheres(elapsed, mid, treble);
+        // Update each layer
+        layersData.forEach((layer, i) => {
+          const {
+            shapeType,
+            group,
+            rotationSpeed,
+            basePos,
+            squares,
+            chessGroup,
+            lineMesh,
+            positions,
+            positionAttr
+          } = layer;
 
-        // Render
-        renderer.render(scene, camera);
-      }
+          // Basic slow rotation
+          group.rotation.z += rotationSpeed * 0.3; // slower
 
-      /******************************************************
-       * Wavy Plane Update
-       ******************************************************/
-      function updateWavyPlane(time, bassVal) {
-        // The plane geometry has (planeSegments+1)*(planeSegments+1) vertices
-        // wavePositions is a Float32Array: [x0,y0,z0, x1,y1,z1, ...]
-        // We'll modify the Y of each vertex based on noise + bass amplitude
+          // Subtle wave in position
+          group.position.x = basePos.x + Math.sin(elapsed * 0.2 + i) * 0.2;
+          group.position.y = basePos.y + Math.cos(elapsed * 0.15 + i * 0.5) * 0.2;
+          group.position.z = basePos.z;
 
-        // map bassVal from [0..255] to a smaller range
-        let displacementAmp = THREE.MathUtils.mapLinear(bassVal, 0, 255, 0.2, 2.5);
+          // Get freq val for this layer
+          let freqIndex = Math.floor(THREE.MathUtils.mapLinear(i, 0, numLayers, 0, freqData.length - 1));
+          let val = freqData[freqIndex];
+          let radiusBase = THREE.MathUtils.mapLinear(val, 0, 255, 1, 8) * intensity;
 
-        // We'll iterate each vertex
-        const vertexCount = (planeSegments + 1) * (planeSegments + 1);
-        let idx = 0;
-        for (let i = 0; i < vertexCount; i++) {
-          // wavePositions[idx] = x
-          // wavePositions[idx+1] = y
-          // wavePositions[idx+2] = z
-          const xPos = wavePositions[idx];
-          const zPos = wavePositions[idx + 2];
+          // Update shape based on type
+          switch (shapeType) {
+            case "chess":
+              // We'll just rotate the chessGroup slightly
+              if (chessGroup) {
+                chessGroup.rotation.y = elapsed * 0.2 * bassFactor;
+                let scale = 1.0 + Math.sin(elapsed + i) * 0.2 * sizeVariation;
+                chessGroup.scale.set(scale, scale, scale);
+              }
+              break;
 
-          // Use noise with time + xPos/zPos
-          // scale coordinates so we get slower waves
-          let noiseVal = noiseGenerator.noise2D(xPos * 0.05 + time * 0.1, zPos * 0.05 + time * 0.1);
+            case "radial":
+              if (lineMesh && positions && positionAttr) {
+                updateRadialShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
+              }
+              break;
 
-          // y is a combination of noise and displacementAmp
-          wavePositions[idx + 1] = noiseVal * displacementAmp;
+            case "squares":
+              if (squares.length > 0) {
+                squares.forEach((sq, index) => {
+                  // rotate gently
+                  sq.rotation.z += 0.001 * (index + 1);
+                  // scale by radiusBase
+                  let sc = radiusBase * 0.1 + 1.0;
+                  sq.scale.set(sc, sc, 1);
+                });
+              }
+              break;
 
-          idx += 3;
-        }
-        // Mark it for update
-        waveAttr.needsUpdate = true;
-      }
+            case "star":
+              if (lineMesh && positions && positionAttr) {
+                updateStarShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
+              }
+              break;
 
-      /******************************************************
-       * Floating Spheres Update
-       ******************************************************/
-      function updateFloatingSpheres(time, midVal, trebleVal) {
-        // Map midVal => vertical speed factor
-        let speedFactor = THREE.MathUtils.mapLinear(midVal, 0, 255, 0.1, 2.0);
-        // Map trebleVal => scale range
-        let scaleFactor = THREE.MathUtils.mapLinear(trebleVal, 0, 255, 0.5, 2.0);
-
-        const dummyMatrix = new THREE.Matrix4();
-        const dummyPos = new THREE.Vector3();
-        const dummyScale = new THREE.Vector3();
-        const dummyQuat = new THREE.Quaternion();
-
-        for (let i = 0; i < instanceCount; i++) {
-          let info = sphereInfos[i];
-
-          // We'll do a simple up/down bounce with noise
-          let xNoise = noiseGenerator.noise2D(info.offsetX, time * info.speed);
-          let zNoise = noiseGenerator.noise2D(info.offsetZ, time * info.speed);
-
-          // Original position was around:
-          //   x ~ ±(planeSize * 0.6)/2
-          //   y ~ [0.5..2.5]
-          //   z ~ ±(planeSize * 0.6)/2
-          // We'll shift them a bit with the noise
-          let baseX = (i * 2.123) % planeSize - planeSize * 0.4; // just some pseudo-random
-          let baseZ = (i * 3.451) % planeSize - planeSize * 0.4;
-          let baseY = 1.0 + (i % 5);
-
-          // Now add some wave
-          dummyPos.set(
-            baseX + xNoise * 2.0,        // small horizontal sway
-            baseY + Math.sin(time + i) * 0.5, // slow vertical bounce
-            baseZ + zNoise * 2.0
-          );
-
-          // slow upward movement influenced by midVal
-          dummyPos.y += time * 0.05 * speedFactor;
-
-          // if it goes too high, wrap it
-          if (dummyPos.y > 8) {
-            dummyPos.y = 0.5;
+            case "arcs":
+              if (lineMesh && positions && positionAttr) {
+                updateArcsShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
+              }
+              break;
           }
-
-          // scale the sphere by treble-based factor
-          let s = 0.3 * scaleFactor;
-          dummyScale.set(s, s, s);
-
-          dummyQuat.set(0, 0, 0, 1); // no rotation here, or you can add a spin
-
-          dummyMatrix.compose(dummyPos, dummyQuat, dummyScale);
-          sphereMesh.setMatrixAt(i, dummyMatrix);
-        }
-        sphereMesh.instanceMatrix.needsUpdate = true;
+        });
       }
 
-      /******************************************************
-       * Helpers
-       ******************************************************/
-      function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.render(scene, camera);
+    }
+
+    /*****************************************************
+     * Update Functions for Each Shape
+     *****************************************************/
+    function updateRadialShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
+      // We have numPoints + 1
+      let idx = 0;
+      for (let angleDeg = 0; angleDeg < 360; angleDeg += angleStep) {
+        let angleRad = THREE.MathUtils.degToRad(angleDeg);
+        // small random offset
+        let rOff = (Math.sin(time * 0.5 + layerIndex * 0.3 + angleRad) * 2);
+        let r = baseRadius + rOff;
+        let x = Math.cos(angleRad) * r * sizeVar;
+        let y = Math.sin(angleRad) * r * sizeVar;
+        positions[idx++] = x;
+        positions[idx++] = y;
+        positions[idx++] = 0;
       }
+      // Close shape
+      positions[idx++] = positions[0];
+      positions[idx++] = positions[1];
+      positions[idx++] = positions[2];
 
-      // Get average magnitude in [startFreq, endFreq]
-      function getFreqRange(analyser, startFreq, endFreq) {
-        const data = analyser.getFrequencyData();
-        const sampleRate = 44100; // approximate
-        const fftSize = analyser.analyser.fftSize;
-        const freqStep = sampleRate / fftSize;
+      positionAttr.needsUpdate = true;
+    }
 
-        let startIndex = Math.floor(startFreq / freqStep);
-        let endIndex = Math.floor(endFreq / freqStep);
-        startIndex = Math.max(0, startIndex);
-        endIndex = Math.min(data.length - 1, endIndex);
+    function updateStarShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
+      // star => alternate big radius / small radius each point
+      let idx = 0;
+      for (let p = 0; p < numPoints; p++) {
+        let angleDeg = p * (360 / numPoints);
+        let angleRad = THREE.MathUtils.degToRad(angleDeg);
+        // alternate radius
+        let factor = (p % 2 === 0) ? 1.8 : 0.7; // star spikes
+        let r = baseRadius * factor + Math.sin(time + p) * 0.5;
+        let x = Math.cos(angleRad) * r * sizeVar;
+        let y = Math.sin(angleRad) * r * sizeVar;
 
-        let sum = 0;
-        let count = 0;
-        for (let i = startIndex; i <= endIndex; i++) {
-          sum += data[i];
-          count++;
-        }
-        return count > 0 ? sum / count : 0;
+        positions[idx++] = x;
+        positions[idx++] = y;
+        positions[idx++] = 0;
       }
+      // close shape by repeating first
+      positions[idx++] = positions[0];
+      positions[idx++] = positions[1];
+      positions[idx++] = positions[2];
+
+      positionAttr.needsUpdate = true;
+    }
+
+    function updateArcsShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
+      // arcs => a spiral from angle=0..(2 or 3 turns)
+      const spiralTurns = 2;
+      let totalPoints = numPoints * spiralTurns;
+      let idx = 0;
+      for (let i = 0; i < totalPoints; i++) {
+        let angle = i * (2 * Math.PI / numPoints);
+        // radius grows with i => spiral
+        let radius = baseRadius * 0.5 + (i * 0.04);
+        let x = Math.cos(angle + time * 0.2 + layerIndex) * radius * sizeVar;
+        let y = (Math.sin(angle * 2 + time * 0.3) * 1.0) * 0.3; // small vertical wave
+        let z = Math.sin(angle + time * 0.2 + layerIndex) * radius * sizeVar * 0.5;
+
+        positions[idx++] = x;
+        positions[idx++] = y;
+        positions[idx++] = z;
+      }
+      // close or extend line with last point repeated
+      positions[idx++] = positions[0];
+      positions[idx++] = positions[1];
+      positions[idx++] = positions[2];
+
+      positionAttr.needsUpdate = true;
+    }
+
+    /*****************************************************
+     * Frequency Range Utility
+     *****************************************************/
+    function getFreqRange(analyser, startFreq, endFreq) {
+      const data = analyser.getFrequencyData();
+      const sampleRate = 44100; // approx
+      const fftSize = analyser.analyser.fftSize;
+      const freqStep = sampleRate / fftSize;
+
+      let startIndex = Math.floor(startFreq / freqStep);
+      let endIndex = Math.floor(endFreq / freqStep);
+      startIndex = Math.max(0, startIndex);
+      endIndex = Math.min(data.length - 1, endIndex);
+
+      let sum = 0, count = 0;
+      for (let i = startIndex; i <= endIndex; i++) {
+        sum += data[i];
+        count++;
+      }
+      return count > 0 ? sum / count : 0;
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
     </script>
   </body>
 </html>
