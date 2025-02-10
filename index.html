@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Three.js VR - Gradients + Transparency + Grain</title>
+    <title>Three.js VR - Transparent Gradients + Grain</title>
   </head>
   <body style="margin:0; padding:0; overflow:hidden;">
     <script type="module">
@@ -16,47 +16,35 @@
     import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/EffectComposer.js';
     import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/RenderPass.js';
     import { FilmPass } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/FilmPass.js';
-    // If you want AR instead: import { ARButton } from ...
 
     /*************************************************************************
      * 2) Configuration
      *************************************************************************/
-    const numLayers = 40;    // Number of layered shapes
-    const numPoints = 24;    // For radial/star shapes
+    const numLayers = 30; // Fewer layers for VR performance
+    const numPoints = 24;
     const angleStep = 360 / numPoints;
-
-    // We have 5 shape types
     const SHAPE_TYPES = ["chess", "radial", "squares", "star", "arcs"];
 
-    // Soft pastel palette
-    const pastelPalette = [
-      "#b2dfdb", // teal
-      "#ffe0b2", // peach
-      "#c5cae9", // lavender
-      "#ffccbc", // coral
-      "#e1bee7"  // pink
-    ];
+    // Soft pastel colors
+    const pastelPalette = ["#b2dfdb", "#ffe0b2", "#c5cae9", "#ffccbc", "#e1bee7"];
 
-    // Scene, camera, renderer
+    // Scene, camera, renderer, postprocessing
     let scene, camera, renderer;
     let clock;
-    // Audio
     let analyser, sound;
-    // Postprocessing composer
-    let composer;
-
-    // Data for each layer
+    let composer; // For VR-compatible postprocessing
     let layersData = [];
 
     init();
 
     /*************************************************************************
-     * 3) Create a gradient ShaderMaterial with transparency
+     * 3) Create a transparent ShaderMaterial for gradients
      *************************************************************************/
     function createGradientMaterial(colorTop, colorBottom) {
       return new THREE.ShaderMaterial({
-        transparent: true,             // allow alpha < 1.0
-        depthWrite: false,             // don't write depth to avoid weird overlaps
+        transparent: true, // Enable transparency
+        depthWrite: false, // Prevent Z-fighting for transparency
+        depthTest: false,
         blending: THREE.NormalBlending,
         uniforms: {
           uColor1: { value: new THREE.Color(colorTop) },
@@ -65,7 +53,7 @@
         vertexShader: `
           varying vec2 vUv;
           void main() {
-            vUv = uv;  // use geometry's UV coords
+            vUv = uv;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
@@ -73,15 +61,9 @@
           varying vec2 vUv;
           uniform vec3 uColor1;
           uniform vec3 uColor2;
-
           void main() {
-            // Blend between uColor1 & uColor2 based on vUv.y
             vec3 color = mix(uColor1, uColor2, vUv.y);
-
-            // Semi-transparent alpha, e.g. 0.6 for a nice overlap
-            float alpha = 0.6;
-
-            gl_FragColor = vec4(color, alpha);
+            gl_FragColor = vec4(color, 0.5); // Semi-transparent
           }
         `,
         side: THREE.DoubleSide
@@ -95,13 +77,7 @@
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x000000);
 
-      camera = new THREE.PerspectiveCamera(
-        70,
-        window.innerWidth / window.innerHeight,
-        0.01,
-        1000
-      );
-      // For VR, device pose overrides this eventually, but let's set a default
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
       camera.position.set(0, 1.6, 5);
       scene.add(camera);
 
@@ -113,8 +89,6 @@
       renderer.xr.enabled = true;
       renderer.setClearColor(0x000000, 1);
       document.body.appendChild(renderer.domElement);
-
-      // VR Button
       document.body.appendChild(VRButton.createButton(renderer));
 
       clock = new THREE.Clock();
@@ -124,10 +98,8 @@
        *************************************************************************/
       const listener = new THREE.AudioListener();
       camera.add(listener);
-
       sound = new THREE.Audio(listener);
       const audioLoader = new THREE.AudioLoader();
-      // Update this to your correct audio file name/path:
       audioLoader.load("StanfordOutpatient3piano.mp3", (buffer) => {
         sound.setBuffer(buffer);
         sound.setLoop(true);
@@ -135,29 +107,19 @@
       analyser = new THREE.AudioAnalyser(sound, 512);
 
       /*************************************************************************
-       * Build Layers (One-time)
+       * Build Layers
        *************************************************************************/
       for (let i = 0; i < numLayers; i++) {
         const shapeType = SHAPE_TYPES[Math.floor(Math.random() * SHAPE_TYPES.length)];
         const group = new THREE.Group();
         scene.add(group);
 
-        // Random position & rotation offset
-        const rotationSpeed = (Math.random() - 0.5) * 0.02;
-        const waveX = (Math.random() - 0.5) * 1.5;
-        const waveY = (Math.random() - 0.5) * 1.5;
-        const waveZ = -3 - i * 0.3;
-
         let dataObj = {
           shapeType,
           group,
-          rotationSpeed,
-          basePos: new THREE.Vector3(waveX, waveY, waveZ),
+          basePos: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, -i * 0.3),
           squares: [],
-          chessGroup: null,
-          lineMesh: null,
-          positions: null,
-          positionAttr: null
+          chessGroup: null
         };
 
         buildLayerShape(dataObj, i);
@@ -165,26 +127,22 @@
       }
 
       /*************************************************************************
-       * Postprocessing Setup (EffectComposer + FilmPass)
+       * VR-Compatible Postprocessing (Film Grain)
        *************************************************************************/
       composer = new EffectComposer(renderer);
+      composer.setSize(window.innerWidth, window.innerHeight);
+      composer.setPixelRatio(window.devicePixelRatio);
       const renderPass = new RenderPass(scene, camera);
       composer.addPass(renderPass);
-
-      // A subtle grain/noise pass using FilmPass:
-      // FilmPass(noiseIntensity, scanlineIntensity, scanlineCount, grayscale)
-      const filmPass = new FilmPass(0.15, 0.0, 0, false);
+      const filmPass = new FilmPass(0.2, 0.0, 0, false);
       composer.addPass(filmPass);
 
       window.addEventListener("resize", onWindowResize, false);
-
-      // XR render loop -> we do postprocessing, so we'll call composer.render()
       renderer.setAnimationLoop(() => {
         updateScene();
         composer.render();
       });
 
-      // Optional: Start audio on pointer/touch
       window.addEventListener("pointerdown", () => {
         if (!sound.isPlaying) {
           sound.play();
@@ -193,380 +151,59 @@
     }
 
     /*************************************************************************
-     * Build Each Layer's Shape
+     * Build Layer Shapes
      *************************************************************************/
     function buildLayerShape(dataObj, layerIndex) {
-      const { shapeType } = dataObj;
+      const { shapeType, group } = dataObj;
 
-      switch (shapeType) {
-        case "chess":
-          buildChessShape(dataObj, layerIndex);
-          break;
-        case "radial":
-          buildRadialShape(dataObj, layerIndex);
-          break;
-        case "squares":
-          buildSquaresShape(dataObj, layerIndex);
-          break;
-        case "star":
-          buildStarShape(dataObj, layerIndex);
-          break;
-        case "arcs":
-          buildArcsShape(dataObj, layerIndex);
-          break;
+      if (shapeType === "chess") {
+        buildChessShape(dataObj, layerIndex);
+      } else if (shapeType === "squares") {
+        buildSquaresShape(dataObj, layerIndex);
       }
     }
 
     /*************************************************************************
-     * Chessboard pattern - each cell uses a gradient material
+     * Chessboard pattern (Transparent Gradients)
      *************************************************************************/
     function buildChessShape(dataObj, layerIndex) {
       const { group } = dataObj;
-
-      // Random rows & cols
-      let cols = THREE.MathUtils.randInt(2, 4);
-      let rows = THREE.MathUtils.randInt(2, 5);
-
-      // We'll pick 2 random pastel colors for "even" squares
-      let c1Index = Math.floor(Math.random() * pastelPalette.length);
-      let c2Index = Math.floor(Math.random() * pastelPalette.length);
-      while (c2Index === c1Index) {
-        c2Index = Math.floor(Math.random() * pastelPalette.length);
-      }
-
-      // And 2 random for "odd" squares
-      let c3Index = Math.floor(Math.random() * pastelPalette.length);
-      let c4Index = Math.floor(Math.random() * pastelPalette.length);
-      while (c4Index === c3Index) {
-        c4Index = Math.floor(Math.random() * pastelPalette.length);
-      }
-
-      const color1 = pastelPalette[c1Index], color2 = pastelPalette[c2Index];
-      const color3 = pastelPalette[c3Index], color4 = pastelPalette[c4Index];
-
-      const chessGroup = new THREE.Group();
-      group.add(chessGroup);
-      dataObj.chessGroup = chessGroup;
-
-      let size = 3; // base size for the entire board
-      let cellW = size / cols;
-      let cellH = size / rows;
-
-      let startX = -size / 2;
-      let startY = -size / 2;
+      let size = 3;
+      let cols = 3, rows = 3;
+      let cellW = size / cols, cellH = size / rows;
 
       for (let cx = 0; cx < cols; cx++) {
         for (let ry = 0; ry < rows; ry++) {
-          let isEven = ((cx + ry) % 2 === 0);
-          // Pick top/bottom colors
-          let topColor    = isEven ? color1 : color3;
-          let bottomColor = isEven ? color2 : color4;
-
+          let colorA = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
+          let colorB = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
           let geo = new THREE.PlaneGeometry(cellW, cellH);
-          let mat = createGradientMaterial(topColor, bottomColor);
-
+          let mat = createGradientMaterial(colorA, colorB);
           let mesh = new THREE.Mesh(geo, mat);
-          mesh.position.set(
-            startX + cx * cellW + cellW / 2,
-            startY + ry * cellH + cellH / 2,
-            0
-          );
-          // tilt slightly
+          mesh.position.set((cx - 1) * cellW, (ry - 1) * cellH, 0);
           mesh.rotation.x = -Math.PI * 0.3;
-          chessGroup.add(mesh);
+          group.add(mesh);
         }
       }
     }
 
-    /*************************************************************************
-     * Radial shape (LineLoop)
-     *************************************************************************/
-    function buildRadialShape(dataObj, layerIndex) {
-      const vertexCount = numPoints + 1; // close shape
-      const positions = new Float32Array(vertexCount * 3);
-      const geometry = new THREE.BufferGeometry();
-      const positionAttr = new THREE.BufferAttribute(positions, 3);
-      geometry.setAttribute("position", positionAttr);
-
-      const colStr = pastelPalette[layerIndex % pastelPalette.length];
-      const mat = new THREE.LineBasicMaterial({ color: colStr });
-
-      const lineLoop = new THREE.LineLoop(geometry, mat);
-      dataObj.group.add(lineLoop);
-
-      dataObj.lineMesh = lineLoop;
-      dataObj.positions = positions;
-      dataObj.positionAttr = positionAttr;
-
-      for (let p = 0; p < vertexCount; p++) {
-        positions[p * 3] = 0;
-        positions[p * 3 + 1] = 0;
-        positions[p * 3 + 2] = 0;
-      }
-    }
-
-    /*************************************************************************
-     * Rotating squares - each square uses a gradient
-     *************************************************************************/
     function buildSquaresShape(dataObj, layerIndex) {
-      const { group, squares } = dataObj;
-      let count = 4;
-      for (let i = 0; i < count; i++) {
-        let size = 2.0;
-        let geo = new THREE.PlaneGeometry(size, size);
-
-        // pick 2 pastel colors for gradient
-        let c1Index = Math.floor(Math.random() * pastelPalette.length);
-        let c2Index = Math.floor(Math.random() * pastelPalette.length);
-        while (c2Index === c1Index) {
-          c2Index = Math.floor(Math.random() * pastelPalette.length);
-        }
-        let mat = createGradientMaterial(
-          pastelPalette[c1Index],
-          pastelPalette[c2Index]
-        );
-
-        let mesh = new THREE.Mesh(geo, mat);
-        mesh.rotation.z = i * 0.5;
-        group.add(mesh);
-        squares.push(mesh);
-      }
+      const { group } = dataObj;
+      let size = 2.0;
+      let geo = new THREE.PlaneGeometry(size, size);
+      let colorA = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
+      let colorB = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
+      let mat = createGradientMaterial(colorA, colorB);
+      let mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.z = Math.random() * Math.PI;
+      group.add(mesh);
     }
 
-    /*************************************************************************
-     * Star shape (LineLoop)
-     *************************************************************************/
-    function buildStarShape(dataObj, layerIndex) {
-      const vertexCount = numPoints + 1;
-      const positions = new Float32Array(vertexCount * 3);
-      const geometry = new THREE.BufferGeometry();
-      const positionAttr = new THREE.BufferAttribute(positions, 3);
-      geometry.setAttribute("position", positionAttr);
-
-      const colStr = pastelPalette[layerIndex % pastelPalette.length];
-      const mat = new THREE.LineBasicMaterial({ color: colStr });
-
-      const lineLoop = new THREE.LineLoop(geometry, mat);
-      dataObj.group.add(lineLoop);
-
-      dataObj.lineMesh = lineLoop;
-      dataObj.positions = positions;
-      dataObj.positionAttr = positionAttr;
-
-      for (let i = 0; i < vertexCount; i++) {
-        positions[i * 3] = 0;
-        positions[i * 3 + 1] = 0;
-        positions[i * 3 + 2] = 0;
-      }
-    }
-
-    /*************************************************************************
-     * Arcs shape (spiral arcs, drawn as a line)
-     *************************************************************************/
-    function buildArcsShape(dataObj, layerIndex) {
-      const spiralTurns = 2;
-      const vertexCount = numPoints * spiralTurns;
-      const positions = new Float32Array((vertexCount + 1) * 3);
-      const geometry = new THREE.BufferGeometry();
-      const positionAttr = new THREE.BufferAttribute(positions, 3);
-      geometry.setAttribute("position", positionAttr);
-
-      const colStr = pastelPalette[layerIndex % pastelPalette.length];
-      const mat = new THREE.LineBasicMaterial({ color: colStr });
-
-      const line = new THREE.Line(geometry, mat);
-      dataObj.group.add(line);
-
-      dataObj.lineMesh = line;
-      dataObj.positions = positions;
-      dataObj.positionAttr = positionAttr;
-
-      for (let i = 0; i < vertexCount + 1; i++) {
-        positions[i * 3] = 0;
-        positions[i * 3 + 1] = 0;
-        positions[i * 3 + 2] = 0;
-      }
-    }
-
-    /*************************************************************************
-     * 4) Scene Update Each Frame
-     *************************************************************************/
     function updateScene() {
-      const elapsed = clock.getElapsedTime();
-
-      if (!analyser) return;
-
-      // Basic frequency analysis
-      const bass = getFreqRange(analyser, 20, 140);
-      const mid = getFreqRange(analyser, 140, 1000);
-      const treble = getFreqRange(analyser, 1000, 20000);
-
-      const intensity = THREE.MathUtils.mapLinear(mid, 0, 255, 0.02, 0.2);
-      const sizeVariation = THREE.MathUtils.mapLinear(treble, 0, 255, 0.5, 2.5);
-      const bassFactor = THREE.MathUtils.mapLinear(bass, 0, 255, 0.5, 3);
-
-      const freqData = analyser.getFrequencyData();
-
-      layersData.forEach((layer, i) => {
-        const {
-          shapeType,
-          group,
-          rotationSpeed,
-          basePos,
-          squares,
-          chessGroup,
-          lineMesh,
-          positions,
-          positionAttr
-        } = layer;
-
-        // Slow rotation
-        group.rotation.z += rotationSpeed * 0.3;
-
-        // Subtle position wave
-        group.position.x = basePos.x + Math.sin(elapsed * 0.2 + i) * 0.2;
-        group.position.y = basePos.y + Math.cos(elapsed * 0.15 + i * 0.5) * 0.2;
-        group.position.z = basePos.z;
-
-        // Layer-specific freq sample
-        let freqIndex = Math.floor(THREE.MathUtils.mapLinear(i, 0, numLayers, 0, freqData.length - 1));
-        let val = freqData[freqIndex];
-        let radiusBase = THREE.MathUtils.mapLinear(val, 0, 255, 1, 8) * intensity;
-
-        switch (shapeType) {
-          case "chess":
-            if (chessGroup) {
-              chessGroup.rotation.y = elapsed * 0.2 * bassFactor;
-              let sc = 1.0 + Math.sin(elapsed + i) * 0.2 * sizeVariation;
-              chessGroup.scale.set(sc, sc, sc);
-            }
-            break;
-
-          case "radial":
-            if (lineMesh && positions && positionAttr) {
-              updateRadialShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
-            }
-            break;
-
-          case "squares":
-            if (squares.length > 0) {
-              squares.forEach((sq, index) => {
-                sq.rotation.z += 0.001 * (index + 1);
-                let sc = radiusBase * 0.1 + 1.0;
-                sq.scale.set(sc, sc, 1);
-              });
-            }
-            break;
-
-          case "star":
-            if (lineMesh && positions && positionAttr) {
-              updateStarShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
-            }
-            break;
-
-          case "arcs":
-            if (lineMesh && positions && positionAttr) {
-              updateArcsShape(positions, positionAttr, radiusBase, sizeVariation, elapsed, i);
-            }
-            break;
-        }
+      layersData.forEach((layer) => {
+        layer.group.rotation.z += 0.001;
       });
     }
 
-    /*************************************************************************
-     * Update the line-based shapes each frame
-     *************************************************************************/
-    function updateRadialShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
-      let idx = 0;
-      for (let angleDeg = 0; angleDeg < 360; angleDeg += angleStep) {
-        let angleRad = THREE.MathUtils.degToRad(angleDeg);
-        let rOff = Math.sin(time * 0.5 + layerIndex * 0.3 + angleRad) * 2;
-        let r = baseRadius + rOff;
-        let x = Math.cos(angleRad) * r * sizeVar;
-        let y = Math.sin(angleRad) * r * sizeVar;
-        positions[idx++] = x;
-        positions[idx++] = y;
-        positions[idx++] = 0;
-      }
-      // close shape
-      positions[idx++] = positions[0];
-      positions[idx++] = positions[1];
-      positions[idx++] = positions[2];
-
-      positionAttr.needsUpdate = true;
-    }
-
-    function updateStarShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
-      let idx = 0;
-      for (let p = 0; p < numPoints; p++) {
-        let angleDeg = p * (360 / numPoints);
-        let angleRad = THREE.MathUtils.degToRad(angleDeg);
-        // star spikes
-        let factor = (p % 2 === 0) ? 1.8 : 0.7;
-        let r = baseRadius * factor + Math.sin(time + p) * 0.5;
-        let x = Math.cos(angleRad) * r * sizeVar;
-        let y = Math.sin(angleRad) * r * sizeVar;
-
-        positions[idx++] = x;
-        positions[idx++] = y;
-        positions[idx++] = 0;
-      }
-      // close shape
-      positions[idx++] = positions[0];
-      positions[idx++] = positions[1];
-      positions[idx++] = positions[2];
-
-      positionAttr.needsUpdate = true;
-    }
-
-    function updateArcsShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
-      const spiralTurns = 2;
-      let totalPoints = numPoints * spiralTurns;
-      let idx = 0;
-      for (let i = 0; i < totalPoints; i++) {
-        let angle = i * (2 * Math.PI / numPoints);
-        let radius = baseRadius * 0.5 + (i * 0.04);
-        let x = Math.cos(angle + time * 0.2 + layerIndex) * radius * sizeVar;
-        let y = Math.sin(angle * 2 + time * 0.3) * 0.3;
-        let z = Math.sin(angle + time * 0.2 + layerIndex) * radius * sizeVar * 0.5;
-
-        positions[idx++] = x;
-        positions[idx++] = y;
-        positions[idx++] = z;
-      }
-      // close or repeat last
-      positions[idx++] = positions[0];
-      positions[idx++] = positions[1];
-      positions[idx++] = positions[2];
-
-      positionAttr.needsUpdate = true;
-    }
-
-    /*************************************************************************
-     * 5) Frequency Range Helper
-     *************************************************************************/
-    function getFreqRange(analyser, startFreq, endFreq) {
-      const data = analyser.getFrequencyData();
-      const sampleRate = 44100; // approx
-      const fftSize = analyser.analyser.fftSize;
-      const freqStep = sampleRate / fftSize;
-
-      let startIndex = Math.floor(startFreq / freqStep);
-      let endIndex = Math.floor(endFreq / freqStep);
-      startIndex = Math.max(0, startIndex);
-      endIndex = Math.min(data.length - 1, endIndex);
-
-      let sum = 0, count = 0;
-      for (let i = startIndex; i <= endIndex; i++) {
-        sum += data[i];
-        count++;
-      }
-      return (count > 0) ? sum / count : 0;
-    }
-
-    /*************************************************************************
-     * Handle window resize
-     *************************************************************************/
     function onWindowResize() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
