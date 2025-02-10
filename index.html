@@ -1,42 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>p5 + A-Frame VR Example</title>
+  <meta charset="UTF-8" />
+  <title>p5 + A-Frame VR with Start Button</title>
 
-  <!-- A-Frame for VR/AR -->
+  <!-- A-Frame for VR -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 
-  <!-- p5.js and p5.sound for your sketch -->
+  <!-- p5.js and p5.sound for audio & canvas -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/p5.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/addons/p5.sound.min.js"></script>
-</head>
-<body style="margin:0; padding:0;">
 
-  <!--
-    A-Frame Scene:
-    - a-scene is the VR environment
-    - a-entity camera + look-controls for moving your view in VR
-    - a-plane is where we'll display the p5.js canvas texture
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden; /* remove scrollbars */
+    }
+
+    /* Position the start button so it's visible */
+    #startButton {
+      position: absolute;
+      z-index: 999;
+      top: 20px;
+      left: 20px;
+      padding: 10px 15px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 
+    Simple HTML button that triggers audio when clicked.
+    This bypasses VR "click" issues and ensures an explicit user gesture.
   -->
+  <button id="startButton" onclick="startAudio()">
+    Start Audio
+  </button>
+
+  <!-- A-Frame scene -->
   <a-scene>
+    <!-- Our VR camera with head-tracking look-controls -->
     <a-entity camera look-controls position="0 1.6 0"></a-entity>
 
-    <!-- The plane that shows your p5 canvas. We'll map p5 onto this. -->
-    <a-plane 
+    <!-- The plane to display our p5 canvas as a texture. 
+         position="0 1.6 -3" means it's 3 meters in front of you at eye level.
+         width and height are in meters in VR space. -->
+    <a-plane
       id="p5-plane"
-      position="0 1.6 -3" 
-      rotation="0 0 0" 
-      width="2" 
+      position="0 1.6 -3"
+      rotation="0 0 0"
+      width="2"
       height="2"
-      material="side:double;"  <!-- double-sided so you can see front/back -->
+      material="side: double;"
     ></a-plane>
   </a-scene>
 
+
   <script>
-    // -------------------------------------------------------
-    // p5.js sketch
-    // -------------------------------------------------------
+    // -------------------------------------------------
+    // p5.js SKETCH
+    // -------------------------------------------------
     let sound, fft;
     let myCanvas;
 
@@ -47,15 +73,16 @@
     let rotationOffsets = [];
     let chessParams = [];
 
+    // A color palette
     let mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
 
+    // Load your mp3 without spaces in the filename
     function preload() {
-      // Make sure 'StanfordOutpatient3 piano.mp3' is in the same folder as this HTML.
       sound = loadSound('StanfordOutpatient3_piano.mp3');
     }
 
     function setup() {
-      // Use a "power of two" size (e.g. 512×512) for a crisp texture on the plane
+      // We'll use a 512x512 canvas so the texture is a power-of-two
       myCanvas = createCanvas(512, 512);
       frameRate(20);
       angleMode(DEGREES);
@@ -63,27 +90,25 @@
       fft = new p5.FFT();
       angleStep = 360 / numPoints;
 
-      // Pre-generate random data for each layer
+      // Pre-generate random data
       for (let i = 0; i < numLayers; i++) {
         rotationOffsets.push(random(-0.5, 0.5));
 
         let cols = floor(random(2, 3));
         let rows = floor(random(2, 5));
-
         let c1 = int(random(mutedPalette.length));
         let c2 = int(random(mutedPalette.length));
         while (c2 === c1) {
           c2 = int(random(mutedPalette.length));
         }
-
         chessParams.push({ cols, rows, color1Index: c1, color2Index: c2 });
       }
 
-      // Map this canvas as a texture on the plane in the A-Frame scene
+      // Link p5 canvas as a texture on the a-plane in A-Frame
       let plane = document.querySelector('#p5-plane');
       plane.setAttribute('material', 'src', myCanvas.elt);
 
-      // Don't start draw loop until user interacts (mousePressed)
+      // We start with noLoop(); draw() won't run until we explicitly loop()
       noLoop();
     }
 
@@ -92,24 +117,18 @@
 
       // Analyze audio
       let spectrum = fft.analyze();
-      let amplitude = fft.getEnergy("mid");    
+      let amplitude = fft.getEnergy("mid");
       let bassEnergy = fft.getEnergy("bass");
       let trebleEnergy = fft.getEnergy("treble");
 
-      // Invert amplitude mapping: louder mid => bigger shapes
       let intensityFactor = map(amplitude, 0, 255, 0.03, 0.25);
-
-      // Treble-based size variation
       let sizeVariation = map(trebleEnergy, 0, 255, 0.5, 5);
 
       translate(width / 2, height / 2);
 
       for (let i = 0; i < numLayers; i++) {
-        // Frequency bin
         let freqIndex = int(map(i, 0, numLayers, 0, spectrum.length));
         let baseRadius = map(spectrum[freqIndex], 0, 255, 50, 180);
-
-        // Scale radius by amplitude
         let radius = baseRadius * intensityFactor;
 
         push();
@@ -123,9 +142,8 @@
         let displaceY = cos(frameCount * 0.01 + i * 0.1) * 155;
         translate(displaceX, displaceY);
 
-        // Vary the shape logic
         if (i % 3 === 0) {
-          // Chessboard
+          // Chessboard pattern
           let size = radius * 1.5;
           let rotationSpeed = map(bassEnergy, 0, 255, 5, 10);
 
@@ -173,6 +191,7 @@
       }
     }
 
+    // Helper: Chessboard
     function drawVariatedChessboard(x, y, w, h, color1, color2, cols, rows) {
       noStroke();
       let cellWidth = w / cols;
@@ -185,13 +204,16 @@
       }
     }
 
-    // User must click (or tap) to start audio
-    function mousePressed() {
+    // -------------------------------------------------
+    // Start Audio from a Button Click
+    // -------------------------------------------------
+    function startAudio() {
       if (!sound.isPlaying()) {
         sound.play();
-        loop();
+        loop(); // start the p5 draw loop
       }
     }
   </script>
+
 </body>
 </html>
