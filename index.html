@@ -2,87 +2,99 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Three.js XR Audio Reactive Example</title>
+    <title>Three.js XR Audio Reactive (Black BG + Floor)</title>
   </head>
   <body style="margin:0; padding:0; overflow:hidden;">
-
     <script type="module">
       /***************************************************************
-       * Import Three.js (as ES module) and ARButton from the examples
+       * Import Three.js as ES module and ARButton
        ***************************************************************/
       import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
       import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/ARButton.js';
 
       /***************************************************************
-       * Configuration & Global Variables
+       * Configuration
        ***************************************************************/
-      const numLayers = 200;
+      const numLayers = 50;  // Reduced for example, can set 200 if desired
       const numPoints = 4;
       const angleStep = 360 / numPoints;
 
+      // p5-like palette
       const mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
 
-      // Similar to p5 random data
       let rotationOffsets = [];
       let chessParams = [];
-
-      // Keep groups for each layer
       let layers = [];
 
-      // Three.js main objects
+      // Main Three.js objects
       let scene, camera, renderer;
-      let listener, sound, analyser;
       let clock;
+      let listener, sound, analyser;
 
-      /***************************************************************
-       * Initialization
-       ***************************************************************/
       init();
 
       function init() {
-        // Scene & Camera
+        /*************************************************************
+         * Scene & Camera
+         *************************************************************/
         scene = new THREE.Scene();
+        // Black background
         scene.background = new THREE.Color(0x000000);
 
+        // Position the camera so it is above the floor looking down
         camera = new THREE.PerspectiveCamera(
           70,
           window.innerWidth / window.innerHeight,
           0.01,
           1000
         );
-        camera.position.set(0, 0, 500);
+        // Place camera about 1.6m above the floor, 3m away from origin
+        camera.position.set(0, 1.6, 3);
+        camera.lookAt(0, 0, 0);
 
-        // Renderer
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        /*************************************************************
+         * Renderer (no alpha => black background, not transparent)
+         *************************************************************/
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
+        // Ensures black is used
+        renderer.setClearColor(0x000000, 1);
         document.body.appendChild(renderer.domElement);
 
-        // AR Button
+        /*************************************************************
+         * AR Button
+         *************************************************************/
         document.body.appendChild(ARButton.createButton(renderer));
+        // Keep in mind: In a real AR session, the camera pose is controlled
+        // by the device, so the manual camera positioning above may be overridden.
 
-        // Clock for time-based animation
+        /*************************************************************
+         * Clock
+         *************************************************************/
         clock = new THREE.Clock();
 
-        // Audio setup
+        /*************************************************************
+         * Audio Setup
+         *************************************************************/
         listener = new THREE.AudioListener();
         camera.add(listener);
 
         sound = new THREE.Audio(listener);
         const audioLoader = new THREE.AudioLoader();
-
-        // Load your MP3 (adjust path as needed)
+        // Load your audio file. Adjust path as needed.
         audioLoader.load("StanfordOutpatient3piano.mp3", function (buffer) {
           sound.setBuffer(buffer);
           sound.setLoop(true);
-          // Typically you must start audio on a user gesture or after an AR session begins
-          // You can also call sound.play() in a user-initiated event (e.g. pointerdown).
+          // Must be played on user gesture or after XR session starts.
         });
 
-        // Create an analyser with a chosen fftSize (1024, 2048, etc. for more detail)
+        // Create analyser
         analyser = new THREE.AudioAnalyser(sound, 1024);
 
-        // Precompute random data for each layer
+        /*************************************************************
+         * Pre-generate random layer data (like in p5)
+         *************************************************************/
         for (let i = 0; i < numLayers; i++) {
           rotationOffsets.push(randRange(-0.5, 0.5));
 
@@ -102,26 +114,26 @@
             color2Index: c2,
           });
 
-          // Each layer is a group
-          let group = new THREE.Group();
+          // Create a group for each layer
+          const group = new THREE.Group();
+          // Place them at y=0 (our "floor"), scattered in XZ
+          // so you see them from the camera above
+          let offsetX = randRange(-2, 2);   // random x
+          let offsetZ = randRange(-4, -2);  // random z in front
+          group.position.set(offsetX, 0, offsetZ);
           layers.push(group);
           scene.add(group);
         }
 
-        // Adjust on resize
+        /*************************************************************
+         * Resize handler
+         *************************************************************/
         window.addEventListener("resize", onWindowResize, false);
 
-        // Use setAnimationLoop for XR rendering
+        /*************************************************************
+         * Start the XR render loop
+         *************************************************************/
         renderer.setAnimationLoop(render);
-      }
-
-      /***************************************************************
-       * Resize Handler
-       ***************************************************************/
-      function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
       }
 
       /***************************************************************
@@ -131,20 +143,17 @@
         const elapsed = clock.getElapsedTime();
         const spectrum = analyser.getFrequencyData();
 
-        // Bass/mid/treble energies:
+        // Approx "bass", "mid", "treble" by frequency range
         const bassEnergy = getFrequencyRangeAverage(analyser, 20, 140);
         const midEnergy = getFrequencyRangeAverage(analyser, 140, 1000);
         const trebleEnergy = getFrequencyRangeAverage(analyser, 1000, 20000);
 
-        // amplitude = mid range
         let amplitude = midEnergy;
-
         let intensityFactor = mapValue(amplitude, 0, 255, 0.03, 0.25);
         let sizeVariation = mapValue(trebleEnergy, 0, 255, 0.5, 5);
 
-        // Rebuild or update each layer's geometry
+        // For each layer, remove old shapes and rebuild
         layers.forEach((group, i) => {
-          // Clear group from previous frame
           while (group.children.length > 0) {
             group.remove(group.children[0]);
           }
@@ -153,20 +162,22 @@
           let baseRadius = mapValue(spectrum[freqIndex], 0, 255, 50, 180);
           let radius = baseRadius * intensityFactor;
 
-          // Rotation offset
-          group.rotation.z = elapsed * rotationOffsets[i];
+          // Rotate each group about Y (since it's in floor space),
+          // or about Z if you want more p5-like effect
+          group.rotation.y = elapsed * rotationOffsets[i];
 
-          // Displacements
-          let displaceX = Math.sin(elapsed * 0.01 + i * 0.1) * 15;
-          let displaceY = Math.cos(elapsed * 0.01 + i * 0.1) * 155;
-          group.position.set(displaceX, displaceY, 0);
+          // Another displacement wave
+          let waveX = Math.sin(elapsed * 0.01 + i * 0.1) * 0.5;
+          let waveZ = Math.cos(elapsed * 0.01 + i * 0.1) * 0.5;
+          group.position.x += waveX * 0.01; // subtle shift
+          group.position.z += waveZ * 0.01;
 
+          // Switch shape type
           if (i % 3 === 0) {
-            // Chessboard pattern
+            // Chessboard
             let size = radius * 1.5;
             let rotationSpeed = mapValue(bassEnergy, 0, 255, 5, 10);
 
-            // Sub-group that rotates
             let chessGroup = new THREE.Group();
             chessGroup.rotation.z = elapsed * 0.5 * rotationSpeed;
             group.add(chessGroup);
@@ -199,12 +210,10 @@
                 chessGroup.add(mesh);
               }
             }
-
           } else if (i % 2 === 0) {
-            // Radial shape (like p5 beginShape/endShape)
+            // Radial shape
             let shapePoints = [];
             for (let angleDeg = 0; angleDeg < 360; angleDeg += angleStep) {
-              // approximate noise with random or small range
               let rOffset = randRange(-10, 20);
               let angleRad = (angleDeg * Math.PI) / 180;
               let r = radius + rOffset;
@@ -212,14 +221,13 @@
               let y = Math.sin(angleRad) * r;
               shapePoints.push(new THREE.Vector3(x, y, 0));
             }
-            shapePoints.push(shapePoints[0].clone()); // close shape
+            shapePoints.push(shapePoints[0].clone());
 
             let geo = new THREE.BufferGeometry().setFromPoints(shapePoints);
             let col = mutedPalette[i % mutedPalette.length];
             let mat = new THREE.LineBasicMaterial({ color: col });
             let line = new THREE.LineLoop(geo, mat);
             group.add(line);
-
           } else {
             // Rotating squares
             let squareSize = radius * 1.2;
@@ -227,42 +235,35 @@
               let offset = randRange(-10, 10);
               let geo = new THREE.PlaneGeometry(squareSize + offset, squareSize + offset);
               let col = mutedPalette[i % mutedPalette.length];
-              let mat = new THREE.MeshBasicMaterial({
-                color: col,
-                wireframe: true,
-              });
+              let mat = new THREE.MeshBasicMaterial({ color: col, wireframe: true });
               let mesh = new THREE.Mesh(geo, mat);
 
-              // rotate each one a bit differently
-              mesh.rotation.z = (50 * Math.PI) / 180 * j; 
+              mesh.rotation.z = (50 * Math.PI) / 180 * j;
               group.add(mesh);
             }
           }
         });
 
+        // Render the scene
         renderer.render(scene, camera);
       }
 
       /***************************************************************
-       * Utility Functions
+       * Utilities
        ***************************************************************/
-
-      // Simple random
       function randRange(min, max) {
         return Math.random() * (max - min) + min;
       }
 
-      // p5-like map
       function mapValue(value, inMin, inMax, outMin, outMax) {
         return ((value - inMin) * (outMax - outMin)) / (inMax - inMin) + outMin;
       }
 
-      // Get average magnitude in a frequency range
+      // Approximate average freq in [startFreq, endFreq]
       function getFrequencyRangeAverage(analyser, startFreq, endFreq) {
         const data = analyser.getFrequencyData();
-        // approximate sample rate or adapt if needed
-        const sampleRate = 44100;
-        const fftSize = analyser.analyser.fftSize; 
+        const sampleRate = 44100; // approximate, or adjust if known
+        const fftSize = analyser.analyser.fftSize;
         const freqStep = sampleRate / fftSize;
 
         let startIndex = Math.floor(startFreq / freqStep);
@@ -270,8 +271,7 @@
         startIndex = Math.max(0, startIndex);
         endIndex = Math.min(data.length - 1, endIndex);
 
-        let sum = 0;
-        let count = 0;
+        let sum = 0, count = 0;
         for (let i = startIndex; i <= endIndex; i++) {
           sum += data[i];
           count++;
@@ -280,10 +280,19 @@
       }
 
       /***************************************************************
-       * Start Audio on pointerdown (optional)
+       * Handle Resizes
+       ***************************************************************/
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      /***************************************************************
+       * Optional: Start Audio on user gesture
        ***************************************************************/
       window.addEventListener("pointerdown", () => {
-        if (sound && !sound.isPlaying) {
+        if (!sound.isPlaying) {
           sound.play();
         }
       });
