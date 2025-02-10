@@ -2,19 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>p5 + A-Frame VR (Click in VR)</title>
+  <title>p5 + A-Frame VR (Chessboard Sketch)</title>
 
   <!-- A-Frame for VR -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 
-  <!-- p5.js and p5.sound for audio & drawing -->
+  <!-- p5.js and p5.sound for your sketch -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/p5.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/addons/p5.sound.min.js"></script>
 
   <style>
     body {
-      margin: 0; 
-      padding: 0; 
+      margin: 0;
+      padding: 0;
       overflow: hidden; /* Hide scrollbars */
     }
   </style>
@@ -23,12 +23,10 @@
 
   <!-- A-Frame Scene -->
   <a-scene>
-
-    <!-- Camera entity with look-controls, plus a GAZE cursor in front of the camera.
-         In VR, you point your head (or look at something) and press trigger. -->
+    <!-- Camera with look-controls, plus a gaze-based cursor so we can "click" in VR -->
     <a-entity camera look-controls>
       <a-entity 
-        cursor="fuse: false; fuseTimeout: 1500" 
+        cursor="fuse: false; fuseTimeout: 1500"
         position="0 0 -1" 
         geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
         material="color: cyan; shader: flat;"
@@ -36,95 +34,185 @@
       </a-entity>
     </a-entity>
 
-    <!-- Plane to display our p5 canvas as a texture.
-         class="clickable" means the cursor can emit a "click" event on it. -->
+    <!-- Plane to show the p5 canvas as a texture. class="clickable" so we can receive VR clicks -->
     <a-plane
       id="p5-plane"
       class="clickable"
-      position="0 1.6 -1"   <!-- 1 meter in front of you, at head height -->
-      width="1.5"
-      height="1.5"
-      material="side: double;" 
+      position="0 1.6 -2"  <!-- 2 meters in front at eye level -->
+      width="2"
+      height="2"
+      material="side: double;"
     ></a-plane>
-
   </a-scene>
 
+  <!-- p5.js Sketch Code -->
   <script>
-    // ----------------------------------------
-    // p5.js Variables
-    // ----------------------------------------
-    let sound, fft;
-    let myCanvas;
+    // ------------------------------------------------------------
+    // Your original code, adapted for VR
+    // ------------------------------------------------------------
 
-    // ----------------------------------------
-    // p5.js Preload
-    // ----------------------------------------
+    let sound, fft;
+
+    // Lower number of layers for performance
+    let numLayers = 200; 
+    // More points for intricate radial shapes
+    let numPoints = 4; 
+    let angleStep;
+
+    let rotationOffsets = []; // For each layer
+    let chessParams = [];     // For chessboard layer config
+
+    // Muted color palette
+    let mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
+
+    // We'll override your mousePressed approach with an A-Frame click
+    // But we'll keep the function so the code is otherwise unchanged.
     function preload() {
-      // Load your MP3 WITHOUT spaces
-      // Must be in the same folder as this HTML file
       sound = loadSound('StanfordOutpatient3_piano.mp3');
     }
 
-    // ----------------------------------------
-    // p5.js Setup
-    // ----------------------------------------
     function setup() {
-      // Create a 512x512 canvas for crisp VR texture
-      myCanvas = createCanvas(512, 512);
+      // Use a 512x512 canvas so the texture is a power-of-two
+      createCanvas(512, 512);
+
       frameRate(20);
+      angleMode(DEGREES);
 
       fft = new p5.FFT();
+      angleStep = 360 / numPoints;
 
-      // We'll not automatically loop the draw().
-      // We'll start it after a click in VR.
+      // Pre-generate random data for each layer to avoid flicker
+      for (let i = 0; i < numLayers; i++) {
+        rotationOffsets.push(random(-0.5, 0.5));
+
+        let cols = floor(random(2, 3));
+        let rows = floor(random(2, 5));
+
+        let c1 = int(random(mutedPalette.length));
+        let c2 = int(random(mutedPalette.length));
+        while (c2 === c1) {
+          c2 = int(random(mutedPalette.length));
+        }
+
+        chessParams.push({ cols, rows, color1Index: c1, color2Index: c2 });
+      }
+
+      // We won't call loop() until the user clicks in VR (or desktop)
       noLoop();
 
-      // Link the p5 canvas as a texture on the a-plane
+      // Link this p5 canvas to our a-plane's material
       let plane = document.querySelector('#p5-plane');
-      plane.setAttribute('material', 'src', myCanvas.elt);
+      plane.setAttribute('material', 'src', canvas);
 
-      // ------------------------------------------------
-      // IMPORTANT: Listen for clicks on the PLANE
-      // (i.e. when the user gazes at the plane and presses the controller trigger)
-      // ------------------------------------------------
+      // Listen for "click" on the plane (VR gaze + trigger or mouse click on desktop)
       plane.addEventListener('click', function () {
-        console.log('Plane was clicked in VR!');
-
-        // Start audio + draw loop if not already playing
+        console.log('Plane was clicked. Starting audio & draw...');
         if (!sound.isPlaying()) {
           sound.play();
-          loop(); // start p5's draw() loop
+          loop();  // Now p5's draw will run repeatedly
         }
       });
-
-      console.log('Setup complete. Waiting for plane click to start audio & draw...');
     }
 
-    // ----------------------------------------
-    // p5.js Draw
-    // ----------------------------------------
     function draw() {
-      // For debug: bright red background
-      background(255, 0, 0);
-      console.log('draw() running, frameCount=', frameCount);
+      background(0);
 
-      // Analyze audio for a simple amplitude-based shape
-      let amplitude = fft.getEnergy("mid");
-      let circleSize = map(amplitude, 0, 255, 50, 200);
+      // Audio analysis
+      let spectrum = fft.analyze();
+      let amplitude = fft.getEnergy("mid"); 
+      let bassEnergy = fft.getEnergy("bass");
+      let trebleEnergy = fft.getEnergy("treble");
 
-      // White circle in the middle
-      fill(255);
+      let intensityFactor = map(amplitude, 0, 255, 0.03, 0.25);
+      let sizeVariation = map(trebleEnergy, 0, 255, 0.5, 5);
+
+      translate(width / 2, height / 2);
+
+      for (let i = 0; i < numLayers; i++) {
+        let freqIndex = int(map(i, 0, numLayers, 0, spectrum.length));
+        let baseRadius = map(spectrum[freqIndex], 0, 255, 50, 180);
+        let radius = baseRadius * intensityFactor;
+
+        push();
+        rotate(frameCount * rotationOffsets[i]);
+
+        stroke(mutedPalette[i % mutedPalette.length]);
+        strokeWeight(1);
+        noFill();
+
+        let displaceX = sin(frameCount * 0.01 + i * 0.1) * 15;
+        let displaceY = cos(frameCount * 0.01 + i * 0.1) * 155;
+        translate(displaceX, displaceY);
+
+        if (i % 3 === 0) {
+          // Chessboard pattern
+          let size = radius * 1.5;
+          let rotationSpeed = map(bassEnergy, 0, 255, 5, 10);
+
+          push();
+          rotate(frameCount * 0.5 * rotationSpeed);
+
+          let cParams = chessParams[i];
+          let c1 = mutedPalette[cParams.color1Index];
+          let c2 = mutedPalette[cParams.color2Index];
+
+          drawVariatedChessboard(
+            -size / 2, 
+            -size / 2, 
+            size * sizeVariation, 
+            size * sizeVariation, 
+            c1, 
+            c2, 
+            cParams.cols, 
+            cParams.rows
+          );
+          pop();
+
+        } else if (i % 2 === 0) {
+          // Radial shape
+          beginShape();
+          for (let angle = 0; angle < 360; angle += angleStep) {
+            let rOffset = map(noise(angle * 0.05, frameCount * 0.01), 0, 1, -10, 20);
+            let x = cos(angle) * (radius + rOffset);
+            let y = sin(angle) * (radius + rOffset);
+            vertex(x, y);
+          }
+          endShape(CLOSE);
+
+        } else {
+          // Rotating squares
+          let squareSize = radius * 1.2;
+          for (let j = 0; j < 4; j++) {
+            let offset = map(noise(j, frameCount * 0.01), 0, 1, -10, 10);
+            rectMode(CENTER);
+            rotate(50);
+            rect(0, 0, squareSize + offset, squareSize + offset);
+          }
+        }
+        pop();
+      }
+    }
+
+    // Chessboard helper
+    function drawVariatedChessboard(x, y, w, h, color1, color2, cols, rows) {
       noStroke();
-      ellipse(width/2, height/2, circleSize, circleSize);
+      let cellWidth = w / cols;
+      let cellHeight = h / rows;
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+          fill((i + j) % 2 === 0 ? color1 : color2);
+          rect(x + i * cellWidth, y + j * cellHeight, cellWidth, cellHeight);
+        }
+      }
+    }
 
-      // Rotating green rectangle for motion
-      push();
-      translate(width/2, height/2);
-      rotate(frameCount * 2); 
-      fill(0, 255, 0);
-      rectMode(CENTER);
-      rect(0, 0, 100, 50);
-      pop();
+    // Keep your mousePressed function for non-VR usage (desktop)
+    // but note it won't work in VR on Quest.
+    function mousePressed() {
+      if (!sound.isPlaying()) {
+        sound.play();
+        loop();
+      }
     }
   </script>
 
