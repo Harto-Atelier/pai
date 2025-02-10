@@ -2,106 +2,122 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>p5 + A-Frame VR Debug Example</title>
+  <title>p5 + A-Frame VR (Click in VR)</title>
 
-  <!-- A-Frame for VR/AR -->
+  <!-- A-Frame for VR -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 
-  <!-- p5.js and p5.sound -->
+  <!-- p5.js and p5.sound for audio & drawing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/p5.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/addons/p5.sound.min.js"></script>
 
   <style>
-    body { 
+    body {
       margin: 0; 
       padding: 0; 
-      overflow: hidden; /* remove scrollbars */
-    }
-    #startButton {
-      position: absolute;
-      z-index: 999;
-      top: 20px;
-      left: 20px;
-      padding: 10px 15px;
-      font-size: 1rem;
-      cursor: pointer;
+      overflow: hidden; /* Hide scrollbars */
     }
   </style>
 </head>
 <body>
 
-  <!-- Button to explicitly start the audio & p5 draw() loop -->
-  <button id="startButton" onclick="startAudio()">
-    Start Audio
-  </button>
-
   <!-- A-Frame Scene -->
   <a-scene>
-    <!-- Camera at eye-height: y=1.6, with look-controls for VR head tracking -->
-    <a-entity camera look-controls position="0 1.6 0"></a-entity>
 
-    <!-- Plane is only 1 meter away (z=-1). 
-         That way it's close and easy to see. -->
+    <!-- Camera entity with look-controls, plus a GAZE cursor in front of the camera.
+         In VR, you point your head (or look at something) and press trigger. -->
+    <a-entity camera look-controls>
+      <a-entity 
+        cursor="fuse: false; fuseTimeout: 1500" 
+        position="0 0 -1" 
+        geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+        material="color: cyan; shader: flat;"
+      >
+      </a-entity>
+    </a-entity>
+
+    <!-- Plane to display our p5 canvas as a texture.
+         class="clickable" means the cursor can emit a "click" event on it. -->
     <a-plane
       id="p5-plane"
-      position="0 1.6 -1"
-      rotation="0 0 0"
-      width="1.5"   <!-- Slightly smaller plane -->
+      class="clickable"
+      position="0 1.6 -1"   <!-- 1 meter in front of you, at head height -->
+      width="1.5"
       height="1.5"
       material="side: double;" 
     ></a-plane>
+
   </a-scene>
 
   <script>
-    // ------------------------------------------
-    // p5.js SKETCH SETUP
-    // ------------------------------------------
+    // ----------------------------------------
+    // p5.js Variables
+    // ----------------------------------------
     let sound, fft;
     let myCanvas;
 
-    // For debugging, let's do a super simple shape in draw().
-    // Once you confirm it's visible, you can reintroduce your
-    // original complexity (numLayers, etc.).
-
+    // ----------------------------------------
+    // p5.js Preload
+    // ----------------------------------------
     function preload() {
-      // Ensure your MP3 file has no spaces in the name.
-      // Place it in the same folder as this HTML.
+      // Load your MP3 WITHOUT spaces
+      // Must be in the same folder as this HTML file
       sound = loadSound('StanfordOutpatient3_piano.mp3');
     }
 
+    // ----------------------------------------
+    // p5.js Setup
+    // ----------------------------------------
     function setup() {
-      // Use a 512x512 canvas for a crisp VR texture
+      // Create a 512x512 canvas for crisp VR texture
       myCanvas = createCanvas(512, 512);
       frameRate(20);
 
       fft = new p5.FFT();
 
-      // Link this p5 canvas to the <a-plane> in A-Frame
-      const plane = document.querySelector('#p5-plane');
+      // We'll not automatically loop the draw().
+      // We'll start it after a click in VR.
+      noLoop();
+
+      // Link the p5 canvas as a texture on the a-plane
+      let plane = document.querySelector('#p5-plane');
       plane.setAttribute('material', 'src', myCanvas.elt);
 
-      // Don't start the draw loop yet:
-      noLoop();
-      console.log("p5 setup complete. Waiting to start audio...");
+      // ------------------------------------------------
+      // IMPORTANT: Listen for clicks on the PLANE
+      // (i.e. when the user gazes at the plane and presses the controller trigger)
+      // ------------------------------------------------
+      plane.addEventListener('click', function () {
+        console.log('Plane was clicked in VR!');
+
+        // Start audio + draw loop if not already playing
+        if (!sound.isPlaying()) {
+          sound.play();
+          loop(); // start p5's draw() loop
+        }
+      });
+
+      console.log('Setup complete. Waiting for plane click to start audio & draw...');
     }
 
-    // ------------------------------------------
-    // p5.js DRAW
-    // ------------------------------------------
+    // ----------------------------------------
+    // p5.js Draw
+    // ----------------------------------------
     function draw() {
-      // For debugging, let's do a bright background:
-      background(255, 0, 0); // bright red
-      console.log("draw() is running, frameCount:", frameCount);
+      // For debug: bright red background
+      background(255, 0, 0);
+      console.log('draw() running, frameCount=', frameCount);
 
-      // Example audio reaction: a circle that changes size
+      // Analyze audio for a simple amplitude-based shape
       let amplitude = fft.getEnergy("mid");
       let circleSize = map(amplitude, 0, 255, 50, 200);
 
-      fill(255); 
+      // White circle in the middle
+      fill(255);
       noStroke();
       ellipse(width/2, height/2, circleSize, circleSize);
 
-      // If you want to test animation, let's rotate a rectangle:
+      // Rotating green rectangle for motion
       push();
       translate(width/2, height/2);
       rotate(frameCount * 2); 
@@ -110,17 +126,7 @@
       rect(0, 0, 100, 50);
       pop();
     }
-
-    // ------------------------------------------
-    // START AUDIO (USER GESTURE)
-    // ------------------------------------------
-    function startAudio() {
-      if (!sound.isPlaying()) {
-        sound.play();
-        loop(); // now draw() will run repeatedly
-        console.log("Audio started, draw loop is now active.");
-      }
-    }
   </script>
+
 </body>
 </html>
