@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>p5 + A-Frame VR (Chessboard Sketch)</title>
+  <title>p5 + A-Frame VR (Button to Start Audio)</title>
 
   <!-- A-Frame for VR -->
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
@@ -17,74 +17,82 @@
       padding: 0;
       overflow: hidden; /* Hide scrollbars */
     }
+
+    /* Position a big START AUDIO button in top-left corner */
+    #startButton {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 999;
+      padding: 10px 15px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
 
+  <!-- A button in 2D (outside VR) to start the audio & p5 draw -->
+  <button id="startButton" onclick="startAudio()">
+    Start Audio
+  </button>
+
   <!-- A-Frame Scene -->
   <a-scene>
-    <!-- Camera with look-controls, plus a gaze-based cursor so we can "click" in VR -->
-    <a-entity camera look-controls>
-      <a-entity 
-        cursor="fuse: false; fuseTimeout: 1500"
-        position="0 0 -1" 
-        geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-        material="color: cyan; shader: flat;"
-      >
-      </a-entity>
-    </a-entity>
+    <!-- Camera with look-controls for VR head tracking -->
+    <a-entity camera look-controls position="0 1.6 0"></a-entity>
 
-    <!-- Plane to show the p5 canvas as a texture. class="clickable" so we can receive VR clicks -->
+    <!-- Plane to display the p5 canvas texture in VR. 
+         Not clickable. You see it, but you start audio from the HTML button. -->
     <a-plane
       id="p5-plane"
-      class="clickable"
-      position="0 1.6 -2"  <!-- 2 meters in front at eye level -->
+      position="0 1.6 -2"
       width="2"
       height="2"
       material="side: double;"
     ></a-plane>
+
   </a-scene>
 
-  <!-- p5.js Sketch Code -->
+
+  <!-- p5.js code (your original audio-reactive sketch) -->
   <script>
-    // ------------------------------------------------------------
-    // Your original code, adapted for VR
-    // ------------------------------------------------------------
-
+    // --------------------------------------
+    // Variables from your code
+    // --------------------------------------
     let sound, fft;
-
-    // Lower number of layers for performance
     let numLayers = 200; 
-    // More points for intricate radial shapes
     let numPoints = 4; 
     let angleStep;
+    let rotationOffsets = []; 
+    let chessParams = [];     
 
-    let rotationOffsets = []; // For each layer
-    let chessParams = [];     // For chessboard layer config
-
-    // Muted color palette
     let mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
 
-    // We'll override your mousePressed approach with an A-Frame click
-    // But we'll keep the function so the code is otherwise unchanged.
+    // --------------------------------------
+    // PRELOAD
+    // --------------------------------------
     function preload() {
+      // Make sure the MP3 file has no spaces, e.g. "StanfordOutpatient3_piano.mp3"
+      // and is in the same folder as this HTML.
       sound = loadSound('StanfordOutpatient3_piano.mp3');
     }
 
+    // --------------------------------------
+    // SETUP
+    // --------------------------------------
     function setup() {
-      // Use a 512x512 canvas so the texture is a power-of-two
+      // 512x512 for better texture compatibility
       createCanvas(512, 512);
-
       frameRate(20);
       angleMode(DEGREES);
 
       fft = new p5.FFT();
       angleStep = 360 / numPoints;
 
-      // Pre-generate random data for each layer to avoid flicker
+      // Pre-generate random data
       for (let i = 0; i < numLayers; i++) {
         rotationOffsets.push(random(-0.5, 0.5));
-
         let cols = floor(random(2, 3));
         let rows = floor(random(2, 5));
 
@@ -93,36 +101,30 @@
         while (c2 === c1) {
           c2 = int(random(mutedPalette.length));
         }
-
         chessParams.push({ cols, rows, color1Index: c1, color2Index: c2 });
       }
 
-      // We won't call loop() until the user clicks in VR (or desktop)
+      // Don't start draw() until the user clicks "Start Audio" button
       noLoop();
 
-      // Link this p5 canvas to our a-plane's material
+      // Assign this p5 canvas as a texture to the a-plane
       let plane = document.querySelector('#p5-plane');
       plane.setAttribute('material', 'src', canvas);
-
-      // Listen for "click" on the plane (VR gaze + trigger or mouse click on desktop)
-      plane.addEventListener('click', function () {
-        console.log('Plane was clicked. Starting audio & draw...');
-        if (!sound.isPlaying()) {
-          sound.play();
-          loop();  // Now p5's draw will run repeatedly
-        }
-      });
     }
 
+    // --------------------------------------
+    // DRAW
+    // --------------------------------------
     function draw() {
       background(0);
 
-      // Audio analysis
+      // Analyze audio
       let spectrum = fft.analyze();
-      let amplitude = fft.getEnergy("mid"); 
+      let amplitude = fft.getEnergy("mid");
       let bassEnergy = fft.getEnergy("bass");
       let trebleEnergy = fft.getEnergy("treble");
 
+      // Loud mid => bigger shapes
       let intensityFactor = map(amplitude, 0, 255, 0.03, 0.25);
       let sizeVariation = map(trebleEnergy, 0, 255, 0.5, 5);
 
@@ -193,7 +195,7 @@
       }
     }
 
-    // Chessboard helper
+    // Helper function: Chessboard pattern
     function drawVariatedChessboard(x, y, w, h, color1, color2, cols, rows) {
       noStroke();
       let cellWidth = w / cols;
@@ -206,8 +208,17 @@
       }
     }
 
-    // Keep your mousePressed function for non-VR usage (desktop)
-    // but note it won't work in VR on Quest.
+    // --------------------------------------
+    // BUTTON to START AUDIO
+    // --------------------------------------
+    function startAudio() {
+      if (!sound.isPlaying()) {
+        sound.play();
+        loop(); // Begin p5 draw loop
+      }
+    }
+
+    // Keep your original mousePressed for completeness (not used in VR):
     function mousePressed() {
       if (!sound.isPlaying()) {
         sound.play();
