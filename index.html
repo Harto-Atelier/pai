@@ -2,230 +2,327 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>p5 + A-Frame VR (Button to Start Audio)</title>
+  <title>Three.js Audio Reactive Example</title>
 
-  <!-- A-Frame for VR -->
-  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-
-  <!-- p5.js and p5.sound for your sketch -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/p5.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.5.0/addons/p5.sound.min.js"></script>
-
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden; /* Hide scrollbars */
-    }
-
-    /* Position a big START AUDIO button in top-left corner */
-    #startButton {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      z-index: 999;
-      padding: 10px 15px;
-      font-size: 1rem;
-      cursor: pointer;
-    }
-  </style>
+  <!-- Three.js from CDN (r158 as of this writing) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js"></script>
 </head>
-<body>
+<body style="margin:0; padding:0; overflow:hidden; background:#000;">
+<script>
+/**
+ * Roughly replicates the logic of your p5 code in Three.js:
+ * - Audio analysis
+ * - Multiple "layers" of objects
+ * - Different shape logic (chessboard, radial shape, rotating squares)
+ * - Color palette usage
+ */
 
-  <!-- A button in 2D (outside VR) to start the audio & p5 draw -->
-  <button id="startButton" onclick="startAudio()">
-    Start Audio
-  </button>
+// --------------------------------------------------------------------
+// GLOBALS
+// --------------------------------------------------------------------
+let scene, camera, renderer;
+let listener, audio, analyser;
 
-  <!-- A-Frame Scene -->
-  <a-scene>
-    <!-- Camera with look-controls for VR head tracking -->
-    <a-entity camera look-controls position="0 1.6 0"></a-entity>
+// We'll track the frequency data in a Uint8Array
+// We'll define how many layers, how many shapes, etc.
+let numLayers = 200;
+let mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
 
-    <!-- Plane to display the p5 canvas texture in VR. 
-         Not clickable. You see it, but you start audio from the HTML button. -->
-    <a-plane
-      id="p5-plane"
-      position="0 1.6 -2"
-      width="2"
-      height="2"
-      material="side: double;"
-    ></a-plane>
+// For each layer, store data about rotation speeds, shape type, random offsets
+let layerData = [];
+let layerMeshes = new THREE.Group(); // hold all the layer objects
 
-  </a-scene>
+// We'll define some "energy" bands like in your p5 code
+let bassIndexRange = [20, 60];    // approximate freq bins for "bass"
+let midIndexRange = [60, 150];    // approximate freq bins for "mid"
+let trebleIndexRange = [150, 256]; // approximate freq bins for "treble" (array size depends on FFT size)
 
 
-  <!-- p5.js code (your original audio-reactive sketch) -->
-  <script>
-    // --------------------------------------
-    // Variables from your code
-    // --------------------------------------
-    let sound, fft;
-    let numLayers = 200; 
-    let numPoints = 4; 
-    let angleStep;
-    let rotationOffsets = []; 
-    let chessParams = [];     
+// --------------------------------------------------------------------
+// INIT
+// --------------------------------------------------------------------
+function init() {
+  // Create scene & camera
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 0, 50);
 
-    let mutedPalette = ["#373636", "#D20049", "#C0B8A0", "#3F51B5", "#E70303"];
+  // Renderer
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-    // --------------------------------------
-    // PRELOAD
-    // --------------------------------------
-    function preload() {
-      // Make sure the MP3 file has no spaces, e.g. "StanfordOutpatient3_piano.mp3"
-      // and is in the same folder as this HTML.
-      sound = loadSound('StanfordOutpatient3_piano.mp3');
-    }
+  // Simple light so we can see our shapes
+  let light = new THREE.DirectionalLight(0xffffff, 0.9);
+  light.position.set(10, 10, 10);
+  scene.add(light);
 
-    // --------------------------------------
-    // SETUP
-    // --------------------------------------
-    function setup() {
-      // 512x512 for better texture compatibility
-      createCanvas(512, 512);
-      frameRate(20);
-      angleMode(DEGREES);
+  // Audio setup
+  listener = new THREE.AudioListener();
+  camera.add(listener);
 
-      fft = new p5.FFT();
-      angleStep = 360 / numPoints;
+  audio = new THREE.Audio(listener);
+  let audioLoader = new THREE.AudioLoader();
+  // Load your MP3 (make sure it's in the same folder)
+  audioLoader.load('StanfordOutpatient3_piano.mp3', function(buffer){
+    audio.setBuffer(buffer);
+    audio.setLoop(true);
+    // We'll only play after a user gesture, see startAudio() below
+  });
 
-      // Pre-generate random data
-      for (let i = 0; i < numLayers; i++) {
-        rotationOffsets.push(random(-0.5, 0.5));
-        let cols = floor(random(2, 3));
-        let rows = floor(random(2, 5));
+  // We'll create an analyser with 256 frequency bins
+  analyser = new THREE.AudioAnalyser(audio, 256);
 
-        let c1 = int(random(mutedPalette.length));
-        let c2 = int(random(mutedPalette.length));
-        while (c2 === c1) {
-          c2 = int(random(mutedPalette.length));
-        }
-        chessParams.push({ cols, rows, color1Index: c1, color2Index: c2 });
-      }
+  // Pre-generate layer data & create objects
+  buildLayers();
 
-      // Don't start draw() until the user clicks "Start Audio" button
-      noLoop();
+  // Add them to the scene
+  scene.add(layerMeshes);
 
-      // Assign this p5 canvas as a texture to the a-plane
-      let plane = document.querySelector('#p5-plane');
-      plane.setAttribute('material', 'src', canvas);
-    }
+  // For resizing
+  window.addEventListener('resize', onWindowResize, false);
 
-    // --------------------------------------
-    // DRAW
-    // --------------------------------------
-    function draw() {
-      background(0);
+  // Start rendering
+  animate();
+}
 
-      // Analyze audio
-      let spectrum = fft.analyze();
-      let amplitude = fft.getEnergy("mid");
-      let bassEnergy = fft.getEnergy("bass");
-      let trebleEnergy = fft.getEnergy("treble");
+// --------------------------------------------------------------------
+// BUILD LAYERS
+// Similar to how p5 code precomputed random offsets & colors
+// --------------------------------------------------------------------
+function buildLayers() {
+  for (let i=0; i < numLayers; i++) {
+    // random rotation offset
+    let rotationOffset = THREE.MathUtils.randFloat(-0.5, 0.5);
 
-      // Loud mid => bigger shapes
-      let intensityFactor = map(amplitude, 0, 255, 0.03, 0.25);
-      let sizeVariation = map(trebleEnergy, 0, 255, 0.5, 5);
+    // pick shape type
+    // (like p5 code: i%3=0 => chessboard, i%2=0 => radial, else squares)
+    let shapeType;
+    if (i % 3 === 0) shapeType = 'chess';
+    else if (i % 2 === 0) shapeType = 'radial';
+    else shapeType = 'squares';
 
-      translate(width / 2, height / 2);
+    // pick a color (for stroke in p5). We'll adapt to Three material color
+    let colorIndex = i % mutedPalette.length;
+    let colorHex = mutedPalette[colorIndex];
 
-      for (let i = 0; i < numLayers; i++) {
-        let freqIndex = int(map(i, 0, numLayers, 0, spectrum.length));
-        let baseRadius = map(spectrum[freqIndex], 0, 255, 50, 180);
-        let radius = baseRadius * intensityFactor;
+    // store data
+    layerData[i] = {
+      rotationOffset,
+      shapeType,
+      colorHex,
+      // optional random offsets for "displaceX" & "displaceY"
+      displaceXFactor: THREE.MathUtils.randFloat(0, 0.1),
+      displaceYFactor: THREE.MathUtils.randFloat(0, 0.1),
+    };
 
-        push();
-        rotate(frameCount * rotationOffsets[i]);
+    // Create a 3D object for this layer
+    let layerObj = createLayerObject(shapeType, colorHex);
+    // Random initial rotation
+    layerObj.rotation.z = THREE.MathUtils.degToRad( Math.random() * 360 );
+    // We'll position them all near origin, then shift them in animate
+    layerObj.position.set(0, 0, 0);
 
-        stroke(mutedPalette[i % mutedPalette.length]);
-        strokeWeight(1);
-        noFill();
+    layerMeshes.add(layerObj);
+  }
+}
 
-        let displaceX = sin(frameCount * 0.01 + i * 0.1) * 15;
-        let displaceY = cos(frameCount * 0.01 + i * 0.1) * 155;
-        translate(displaceX, displaceY);
+// --------------------------------------------------------------------
+// CREATE LAYER OBJECT
+// We'll create different geometry or sub-objects depending on shapeType
+// --------------------------------------------------------------------
+function createLayerObject(shapeType, colorHex) {
+  let group = new THREE.Group();
 
-        if (i % 3 === 0) {
-          // Chessboard pattern
-          let size = radius * 1.5;
-          let rotationSpeed = map(bassEnergy, 0, 255, 5, 10);
+  if (shapeType === 'chess') {
+    // Chessboard pattern:
+    // We'll build a plane subdivided in a few squares, alternating color
+    // For simplicity, random rows/cols in [2..5]
+    let rows = THREE.MathUtils.randInt(2, 5);
+    let cols = THREE.MathUtils.randInt(2, 3);
 
-          push();
-          rotate(frameCount * 0.5 * rotationSpeed);
+    let size = 10; // overall size
+    let cellW = size / cols;
+    let cellH = size / rows;
 
-          let cParams = chessParams[i];
-          let c1 = mutedPalette[cParams.color1Index];
-          let c2 = mutedPalette[cParams.color2Index];
+    // pick another color from the palette, different from colorHex
+    let altColor;
+    do {
+      altColor = mutedPalette[THREE.MathUtils.randInt(0, mutedPalette.length -1)];
+    } while(altColor === colorHex);
 
-          drawVariatedChessboard(
-            -size / 2, 
-            -size / 2, 
-            size * sizeVariation, 
-            size * sizeVariation, 
-            c1, 
-            c2, 
-            cParams.cols, 
-            cParams.rows
-          );
-          pop();
+    for (let r=0; r<rows; r++){
+      for (let c=0; c<cols; c++){
+        let index = r*cols + c;
+        let isEven = ((r+c) % 2 === 0);
 
-        } else if (i % 2 === 0) {
-          // Radial shape
-          beginShape();
-          for (let angle = 0; angle < 360; angle += angleStep) {
-            let rOffset = map(noise(angle * 0.05, frameCount * 0.01), 0, 1, -10, 20);
-            let x = cos(angle) * (radius + rOffset);
-            let y = sin(angle) * (radius + rOffset);
-            vertex(x, y);
-          }
-          endShape(CLOSE);
+        let cellGeo = new THREE.PlaneGeometry(cellW, cellH);
+        let cellMat = new THREE.MeshPhongMaterial({
+          color: (isEven ? colorHex : altColor)
+        });
+        let cellMesh = new THREE.Mesh(cellGeo, cellMat);
 
-        } else {
-          // Rotating squares
-          let squareSize = radius * 1.2;
-          for (let j = 0; j < 4; j++) {
-            let offset = map(noise(j, frameCount * 0.01), 0, 1, -10, 10);
-            rectMode(CENTER);
-            rotate(50);
-            rect(0, 0, squareSize + offset, squareSize + offset);
-          }
-        }
-        pop();
+        let x = c*cellW - size/2 + cellW/2;
+        let y = r*cellH - size/2 + cellH/2;
+        cellMesh.position.set(x, y, 0);
+
+        group.add(cellMesh);
       }
     }
+  }
+  else if (shapeType === 'radial') {
+    // We'll approximate a "radial shape" with a ring geometry, or a set of ring segments
+    // p5 code draws a circle with noise offsets => let's just do a ring
+    let radiusInner = 3;
+    let radiusOuter = 5;
 
-    // Helper function: Chessboard pattern
-    function drawVariatedChessboard(x, y, w, h, color1, color2, cols, rows) {
-      noStroke();
-      let cellWidth = w / cols;
-      let cellHeight = h / rows;
-      for (let i = 0; i < cols; i++) {
-        for (let j = 0; j < rows; j++) {
-          fill((i + j) % 2 === 0 ? color1 : color2);
-          rect(x + i * cellWidth, y + j * cellHeight, cellWidth, cellHeight);
-        }
-      }
+    let ringGeo = new THREE.RingGeometry(radiusInner, radiusOuter, 32);
+    let ringMat = new THREE.MeshPhongMaterial({ color: colorHex, side: THREE.DoubleSide });
+    let ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    group.add(ringMesh);
+  }
+  else { // 'squares'
+    // We'll create a group of 4 squares, each rotating
+    let squareSize = 2.5;
+    for (let j=0; j<4; j++){
+      let geo = new THREE.BoxGeometry(squareSize, squareSize, 0.2);
+      let mat = new THREE.MeshPhongMaterial({ color: colorHex });
+      let box = new THREE.Mesh(geo, mat);
+      // rotate each box by 50 deg from the previous, just like p5 code
+      box.rotation.z = THREE.MathUtils.degToRad( j * 50 );
+      group.add(box);
     }
+  }
 
-    // --------------------------------------
-    // BUTTON to START AUDIO
-    // --------------------------------------
-    function startAudio() {
-      if (!sound.isPlaying()) {
-        sound.play();
-        loop(); // Begin p5 draw loop
-      }
+  return group;
+}
+
+
+// --------------------------------------------------------------------
+// ANIMATE (like p5 draw):
+// We read the frequency data, interpret bass/mid/treble, transform layers
+// --------------------------------------------------------------------
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Update the analyser data
+  analyser.getFrequencyData(); // writes freq data into internal array
+
+  // We'll approximate amplitude from "mid" range
+  let amplitude = getFrequencyEnergy(midIndexRange[0], midIndexRange[1]);
+  let bassEnergy = getFrequencyEnergy(bassIndexRange[0], bassIndexRange[1]);
+  let trebleEnergy = getFrequencyEnergy(trebleIndexRange[0], trebleIndexRange[1]);
+
+  // Map amplitude [0..255] to some factor
+  let intensityFactor = mapRange(amplitude, 0, 255, 0.03, 0.25);
+  let sizeVariation = mapRange(trebleEnergy, 0, 255, 0.5, 5);
+
+  // For each layer
+  for (let i=0; i<numLayers; i++){
+    let data = layerData[i];
+    let mesh = layerMeshes.children[i];
+
+    // "Rotate frameCount * rotationOffset"
+    let frameCount = performance.now() * 0.01; // a simple time-based approach
+    mesh.rotation.z = frameCount * data.rotationOffset * 0.01;
+
+    // Displacement
+    // p5 used sin/cos of frameCount * 0.01 + i*0.1
+    let dx = Math.sin((performance.now()*0.001) + i*0.1) * 15;
+    let dy = Math.cos((performance.now()*0.001) + i*0.1) * 155 * 0.01; // scale
+    mesh.position.x = dx * 0.1; 
+    mesh.position.y = dy * 0.1;
+
+    // For 'chess' layers (i%3===0), let's do a spin or scale
+    if (data.shapeType === 'chess') {
+      let rotationSpeed = mapRange(bassEnergy, 0, 255, 0.05, 0.15);
+      mesh.rotation.z += frameCount * rotationSpeed * 0.001;
+
+      // scale it by sizeVariation
+      let s = 1 * sizeVariation; 
+      mesh.scale.set(s, s, 1);
     }
-
-    // Keep your original mousePressed for completeness (not used in VR):
-    function mousePressed() {
-      if (!sound.isPlaying()) {
-        sound.play();
-        loop();
-      }
+    else if (data.shapeType === 'radial') {
+      // We can scale the ring by amplitude
+      let r = 1 + intensityFactor * 5;
+      mesh.scale.set(r, r, r);
     }
-  </script>
+    else {
+      // 'squares' => rotate each child
+      // We'll do it in a simple loop
+      mesh.children.forEach((box, index) => {
+        box.rotation.z = mapRange(noise((i+index)*0.1 + performance.now()*0.0005), 0,1, 0, Math.PI*2);
+      });
+      // scale by amplitude as well
+      let s = 1 + intensityFactor*2;
+      mesh.scale.set(s, s, s);
+    }
+  }
 
+  renderer.render(scene, camera);
+}
+
+// --------------------------------------------------------------------
+// UTILS
+// --------------------------------------------------------------------
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+/**
+ * Map a value from [inMin..inMax] to [outMin..outMax]
+ */
+function mapRange(value, inMin, inMax, outMin, outMax){
+  return outMin + (outMax - outMin) * ((value - inMin) / (inMax - inMin));
+}
+
+/**
+ * Get average energy from the analyser array in [startIndex..endIndex]
+ */
+function getFrequencyEnergy(startIndex, endIndex) {
+  let freqData = analyser.analyser.frequencyBinCount; // 256
+  let sum = 0;
+  let count = 0;
+  let arr = analyser.data; // the Uint8Array of freq data
+  endIndex = Math.min(endIndex, arr.length-1);
+
+  for (let i=startIndex; i<=endIndex; i++){
+    sum += arr[i];
+    count++;
+  }
+  return count > 0 ? sum/count : 0;
+}
+
+/**
+ * Simple Perlin-like noise placeholder or any random approach
+ * (Three.js doesn't have built-in noise, so here's a quick static fallback).
+ * In a real project, import a noise library or use an alternative approach.
+ */
+function noise(x) {
+  // We'll just do a cheap random approach.
+  // For actual noise, consider importing something like 'noisejs'.
+  return (Math.sin(x*12.9898) * 43758.5453) % 1;
+}
+
+// --------------------------------------------------------------------
+// PLAY AUDIO ON USER GESTURE
+// (Some browsers require a button or click event to allow audio playback.)
+// --------------------------------------------------------------------
+function startAudio() {
+  if (!audio.isPlaying){
+    audio.play();
+  }
+}
+
+// --------------------------------------------------------------------
+// START
+// --------------------------------------------------------------------
+init();
+
+// Optional: If you want a button in HTML to call startAudio(), add it there.
+// Or just open console and type startAudio() after the page loads.
+</script>
 </body>
 </html>
