@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <title>Three.js VR - Transparent Gradients + Grain</title>
-  </head>
-  <body style="margin:0; padding:0; overflow:hidden;">
-    <script type="module">
+</head>
+<body style="margin:0; padding:0; overflow:hidden;">
+<script type="module">
     /*************************************************************************
-     * 1) Import Three.js, VRButton, and Postprocessing modules
+     * ✅ FIXED: Use Three.js CDN for Imports
      *************************************************************************/
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/webxr/VRButton.js';
 
-    // Postprocessing
+    // ✅ Fix Postprocessing Imports
     import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/EffectComposer.js';
     import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/RenderPass.js';
     import { FilmPass } from 'https://cdn.jsdelivr.net/npm/three@latest/examples/jsm/postprocessing/FilmPass.js';
@@ -20,196 +20,154 @@
     /*************************************************************************
      * 2) Configuration
      *************************************************************************/
-    const numLayers = 30; // Fewer layers for VR performance
-    const numPoints = 24;
-    const angleStep = 360 / numPoints;
-    const SHAPE_TYPES = ["chess", "radial", "squares", "star", "arcs"];
-
-    // Soft pastel colors
+    const numLayers = 20; // Fewer layers for VR performance
     const pastelPalette = ["#b2dfdb", "#ffe0b2", "#c5cae9", "#ffccbc", "#e1bee7"];
 
     // Scene, camera, renderer, postprocessing
     let scene, camera, renderer;
     let clock;
     let analyser, sound;
-    let composer; // For VR-compatible postprocessing
+    let composer;
     let layersData = [];
 
     init();
 
     /*************************************************************************
-     * 3) Create a transparent ShaderMaterial for gradients
+     * ✅ 3) Transparent Gradient Shader
      *************************************************************************/
     function createGradientMaterial(colorTop, colorBottom) {
-      return new THREE.ShaderMaterial({
-        transparent: true, // Enable transparency
-        depthWrite: false, // Prevent Z-fighting for transparency
-        depthTest: false,
-        blending: THREE.NormalBlending,
-        uniforms: {
-          uColor1: { value: new THREE.Color(colorTop) },
-          uColor2: { value: new THREE.Color(colorBottom) }
-        },
-        vertexShader: `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: `
-          varying vec2 vUv;
-          uniform vec3 uColor1;
-          uniform vec3 uColor2;
-          void main() {
-            vec3 color = mix(uColor1, uColor2, vUv.y);
-            gl_FragColor = vec4(color, 0.5); // Semi-transparent
-          }
-        `,
-        side: THREE.DoubleSide
-      });
+        return new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false, 
+            depthTest: false,
+            blending: THREE.NormalBlending,
+            uniforms: {
+                uColor1: { value: new THREE.Color(colorTop) },
+                uColor2: { value: new THREE.Color(colorBottom) }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform vec3 uColor1;
+                uniform vec3 uColor2;
+                void main() {
+                    vec3 color = mix(uColor1, uColor2, vUv.y);
+                    gl_FragColor = vec4(color, 0.5); // Semi-transparent
+                }
+            `,
+            side: THREE.DoubleSide
+        });
     }
 
     function init() {
-      /*************************************************************************
-       * Scene & Camera
-       *************************************************************************/
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000000);
+        /*************************************************************************
+         * ✅ 4) Scene & Camera
+         *************************************************************************/
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
 
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
-      camera.position.set(0, 1.6, 5);
-      scene.add(camera);
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+        camera.position.set(0, 1.6, 5);
+        scene.add(camera);
 
-      /*************************************************************************
-       * Renderer
-       *************************************************************************/
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled = true;
-      renderer.setClearColor(0x000000, 1);
-      document.body.appendChild(renderer.domElement);
-      document.body.appendChild(VRButton.createButton(renderer));
+        /*************************************************************************
+         * ✅ 5) Renderer
+         *************************************************************************/
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-      clock = new THREE.Clock();
+        clock = new THREE.Clock();
 
-      /*************************************************************************
-       * Audio
-       *************************************************************************/
-      const listener = new THREE.AudioListener();
-      camera.add(listener);
-      sound = new THREE.Audio(listener);
-      const audioLoader = new THREE.AudioLoader();
-      audioLoader.load("StanfordOutpatient3piano.mp3", (buffer) => {
-        sound.setBuffer(buffer);
-        sound.setLoop(true);
-      });
-      analyser = new THREE.AudioAnalyser(sound, 512);
+        /*************************************************************************
+         * ✅ 6) Audio
+         *************************************************************************/
+        const listener = new THREE.AudioListener();
+        camera.add(listener);
+        sound = new THREE.Audio(listener);
+        const audioLoader = new THREE.AudioLoader();
+        audioLoader.load("StanfordOutpatient3piano.mp3", (buffer) => {
+            sound.setBuffer(buffer);
+            sound.setLoop(true);
+        });
+        analyser = new THREE.AudioAnalyser(sound, 512);
 
-      /*************************************************************************
-       * Build Layers
-       *************************************************************************/
-      for (let i = 0; i < numLayers; i++) {
-        const shapeType = SHAPE_TYPES[Math.floor(Math.random() * SHAPE_TYPES.length)];
-        const group = new THREE.Group();
-        scene.add(group);
+        /*************************************************************************
+         * ✅ 7) Build Layers
+         *************************************************************************/
+        for (let i = 0; i < numLayers; i++) {
+            const group = new THREE.Group();
+            scene.add(group);
 
-        let dataObj = {
-          shapeType,
-          group,
-          basePos: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, -i * 0.3),
-          squares: [],
-          chessGroup: null
-        };
+            let dataObj = {
+                group,
+                basePos: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, -i * 0.3),
+                squares: []
+            };
 
-        buildLayerShape(dataObj, i);
-        layersData.push(dataObj);
-      }
-
-      /*************************************************************************
-       * VR-Compatible Postprocessing (Film Grain)
-       *************************************************************************/
-      composer = new EffectComposer(renderer);
-      composer.setSize(window.innerWidth, window.innerHeight);
-      composer.setPixelRatio(window.devicePixelRatio);
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
-      const filmPass = new FilmPass(0.2, 0.0, 0, false);
-      composer.addPass(filmPass);
-
-      window.addEventListener("resize", onWindowResize, false);
-      renderer.setAnimationLoop(() => {
-        updateScene();
-        composer.render();
-      });
-
-      window.addEventListener("pointerdown", () => {
-        if (!sound.isPlaying) {
-          sound.play();
+            buildSquaresShape(dataObj, i);
+            layersData.push(dataObj);
         }
-      });
+
+        /*************************************************************************
+         * ✅ 8) VR-Compatible Postprocessing (Film Grain)
+         *************************************************************************/
+        composer = new EffectComposer(renderer);
+        composer.setSize(window.innerWidth, window.innerHeight);
+        composer.setPixelRatio(window.devicePixelRatio);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+        const filmPass = new FilmPass(0.2, 0.0, 0, false);
+        composer.addPass(filmPass);
+
+        window.addEventListener("resize", onWindowResize, false);
+        renderer.setAnimationLoop(() => {
+            updateScene();
+            composer.render();
+        });
+
+        window.addEventListener("pointerdown", () => {
+            if (!sound.isPlaying) {
+                sound.play();
+            }
+        });
     }
 
     /*************************************************************************
-     * Build Layer Shapes
+     * ✅ 9) Build Squares Shape (Transparent Gradients)
      *************************************************************************/
-    function buildLayerShape(dataObj, layerIndex) {
-      const { shapeType, group } = dataObj;
-
-      if (shapeType === "chess") {
-        buildChessShape(dataObj, layerIndex);
-      } else if (shapeType === "squares") {
-        buildSquaresShape(dataObj, layerIndex);
-      }
-    }
-
-    /*************************************************************************
-     * Chessboard pattern (Transparent Gradients)
-     *************************************************************************/
-    function buildChessShape(dataObj, layerIndex) {
-      const { group } = dataObj;
-      let size = 3;
-      let cols = 3, rows = 3;
-      let cellW = size / cols, cellH = size / rows;
-
-      for (let cx = 0; cx < cols; cx++) {
-        for (let ry = 0; ry < rows; ry++) {
-          let colorA = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
-          let colorB = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
-          let geo = new THREE.PlaneGeometry(cellW, cellH);
-          let mat = createGradientMaterial(colorA, colorB);
-          let mesh = new THREE.Mesh(geo, mat);
-          mesh.position.set((cx - 1) * cellW, (ry - 1) * cellH, 0);
-          mesh.rotation.x = -Math.PI * 0.3;
-          group.add(mesh);
-        }
-      }
-    }
-
     function buildSquaresShape(dataObj, layerIndex) {
-      const { group } = dataObj;
-      let size = 2.0;
-      let geo = new THREE.PlaneGeometry(size, size);
-      let colorA = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
-      let colorB = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
-      let mat = createGradientMaterial(colorA, colorB);
-      let mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.z = Math.random() * Math.PI;
-      group.add(mesh);
+        const { group } = dataObj;
+        let size = 2.0;
+        let geo = new THREE.PlaneGeometry(size, size);
+        let colorA = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
+        let colorB = pastelPalette[Math.floor(Math.random() * pastelPalette.length)];
+        let mat = createGradientMaterial(colorA, colorB);
+        let mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.z = Math.random() * Math.PI;
+        group.add(mesh);
     }
 
     function updateScene() {
-      layersData.forEach((layer) => {
-        layer.group.rotation.z += 0.001;
-      });
+        layersData.forEach((layer) => {
+            layer.group.rotation.z += 0.001;
+        });
     }
 
     function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      composer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        composer.setSize(window.innerWidth, window.innerHeight);
     }
-    </script>
-  </body>
+</script>
+</body>
 </html>
