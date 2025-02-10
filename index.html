@@ -2,11 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Three.js VR - Layered, More Patterns & Details</title>
+    <title>Three.js VR - Layered with Gradients</title>
   </head>
   <body style="margin:0; padding:0; overflow:hidden;">
     <script type="module">
-
     /*****************************************************
      * 1) Imports
      *****************************************************/
@@ -40,6 +39,36 @@
     let layersData = [];
 
     init();
+
+    /*****************************************************
+     * ShaderMaterial for gradient fill
+     *****************************************************/
+    function createGradientMaterial(colorTop, colorBottom) {
+      return new THREE.ShaderMaterial({
+        uniforms: {
+          uColor1: { value: new THREE.Color(colorTop) },
+          uColor2: { value: new THREE.Color(colorBottom) }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;   // use geometry's UVs
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec2 vUv;
+          uniform vec3 uColor1;
+          uniform vec3 uColor2;
+          void main() {
+            // Blend between uColor1 & uColor2 based on vUv.y
+            vec3 color = mix(uColor1, uColor2, vUv.y);
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `,
+        side: THREE.DoubleSide
+      });
+    }
 
     function init() {
       /*****************************************************
@@ -160,7 +189,7 @@
     }
 
     /*****************************************************
-     * Chessboard pattern (like the old code)
+     * Chessboard pattern, but each cell has a gradient fill
      *****************************************************/
     function buildChessShape(dataObj, layerIndex) {
       const { group } = dataObj;
@@ -169,21 +198,25 @@
       let cols = THREE.MathUtils.randInt(2, 4);
       let rows = THREE.MathUtils.randInt(2, 5);
 
-      // Two different pastel colors
+      // We'll pick 2 random pastel colors for the "even" squares
       let c1Index = Math.floor(Math.random() * pastelPalette.length);
       let c2Index = Math.floor(Math.random() * pastelPalette.length);
       while (c2Index === c1Index) {
         c2Index = Math.floor(Math.random() * pastelPalette.length);
       }
-      let color1 = new THREE.Color(pastelPalette[c1Index]);
-      let color2 = new THREE.Color(pastelPalette[c2Index]);
+      // We'll also pick 2 random pastel colors for the "odd" squares
+      let c3Index = Math.floor(Math.random() * pastelPalette.length);
+      let c4Index = Math.floor(Math.random() * pastelPalette.length);
+      while (c4Index === c3Index) {
+        c4Index = Math.floor(Math.random() * pastelPalette.length);
+      }
 
       // Build sub-group
       const chessGroup = new THREE.Group();
       group.add(chessGroup);
       dataObj.chessGroup = chessGroup;
 
-      let size = 3; // base size
+      let size = 3; // base size for the entire board
       let cellW = size / cols;
       let cellH = size / rows;
 
@@ -192,26 +225,30 @@
 
       for (let cx = 0; cx < cols; cx++) {
         for (let ry = 0; ry < rows; ry++) {
-          let isColor1 = ((cx + ry) % 2 === 0);
-          let cellColor = isColor1 ? color1 : color2;
+          let isEvenCell = ((cx + ry) % 2 === 0);
+          // if it's even, use color1->color2, else color3->color4
+          let topColor  = isEvenCell ? pastelPalette[c1Index] : pastelPalette[c3Index];
+          let bottomColor = isEvenCell ? pastelPalette[c2Index] : pastelPalette[c4Index];
 
           let geometry = new THREE.PlaneGeometry(cellW, cellH);
-          let material = new THREE.MeshBasicMaterial({ color: cellColor });
+          // Create a gradient from topColor to bottomColor
+          let material = createGradientMaterial(topColor, bottomColor);
+
           let mesh = new THREE.Mesh(geometry, material);
           mesh.position.set(
             startX + cx * cellW + cellW / 2,
             startY + ry * cellH + cellH / 2,
             0
           );
-          // rotate so it faces camera
-          mesh.rotation.x = -Math.PI * 0.3; 
+          // rotate so it slightly faces the camera
+          mesh.rotation.x = -Math.PI * 0.3;
           chessGroup.add(mesh);
         }
       }
     }
 
     /*****************************************************
-     * Radial shape (line loop)
+     * Radial shape (line loop) - outline only
      *****************************************************/
     function buildRadialShape(dataObj, layerIndex) {
       const vertexCount = numPoints + 1; // close shape
@@ -220,7 +257,7 @@
       const positionAttr = new THREE.BufferAttribute(positions, 3);
       geometry.setAttribute("position", positionAttr);
 
-      // random pastel color
+      // random pastel color for the line
       const colStr = pastelPalette[layerIndex % pastelPalette.length];
       const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(colStr) });
 
@@ -240,7 +277,7 @@
     }
 
     /*****************************************************
-     * Rotating squares
+     * Rotating squares - each square is gradient-filled
      *****************************************************/
     function buildSquaresShape(dataObj, layerIndex) {
       const { group, squares } = dataObj;
@@ -249,8 +286,17 @@
       for (let i = 0; i < count; i++) {
         let size = 2.0;
         let geo = new THREE.PlaneGeometry(size, size);
-        let colStr = pastelPalette[(layerIndex + i) % pastelPalette.length];
-        let mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colStr), wireframe: true });
+
+        // pick 2 random pastel colors for gradient
+        let c1Index = Math.floor(Math.random() * pastelPalette.length);
+        let c2Index = Math.floor(Math.random() * pastelPalette.length);
+        while (c2Index === c1Index) {
+          c2Index = Math.floor(Math.random() * pastelPalette.length);
+        }
+        let mat = createGradientMaterial(
+          pastelPalette[c1Index],
+          pastelPalette[c2Index]
+        );
 
         let mesh = new THREE.Mesh(geo, mat);
         // offset or rotate them a bit
@@ -263,11 +309,9 @@
 
     /*****************************************************
      * Star shape (line loop)
-     * Similar to radial but with "spikes"
      *****************************************************/
     function buildStarShape(dataObj, layerIndex) {
       // We'll define a star by alternating radius
-      // e.g. big radius, small radius, big radius...
       const vertexCount = numPoints + 1; // close shape
       const positions = new Float32Array(vertexCount * 3);
       const geometry = new THREE.BufferGeometry();
@@ -293,8 +337,7 @@
     }
 
     /*****************************************************
-     * Arcs shape (spiral arcs)
-     * We build it as a line
+     * Arcs shape (spiral arcs) - line
      *****************************************************/
     function buildArcsShape(dataObj, layerIndex) {
       // We'll do a line that arcs outward in a spiral
@@ -419,7 +462,7 @@
     }
 
     /*****************************************************
-     * Update Functions for Each Shape
+     * Update Functions for Each Line Shape
      *****************************************************/
     function updateRadialShape(positions, positionAttr, baseRadius, sizeVar, time, layerIndex) {
       // We have numPoints + 1
@@ -427,7 +470,7 @@
       for (let angleDeg = 0; angleDeg < 360; angleDeg += angleStep) {
         let angleRad = THREE.MathUtils.degToRad(angleDeg);
         // small random offset
-        let rOff = (Math.sin(time * 0.5 + layerIndex * 0.3 + angleRad) * 2);
+        let rOff = Math.sin(time * 0.5 + layerIndex * 0.3 + angleRad) * 2;
         let r = baseRadius + rOff;
         let x = Math.cos(angleRad) * r * sizeVar;
         let y = Math.sin(angleRad) * r * sizeVar;
@@ -477,7 +520,7 @@
         // radius grows with i => spiral
         let radius = baseRadius * 0.5 + (i * 0.04);
         let x = Math.cos(angle + time * 0.2 + layerIndex) * radius * sizeVar;
-        let y = (Math.sin(angle * 2 + time * 0.3) * 1.0) * 0.3; // small vertical wave
+        let y = Math.sin(angle * 2 + time * 0.3) * 1.0 * 0.3; // small vertical wave
         let z = Math.sin(angle + time * 0.2 + layerIndex) * radius * sizeVar * 0.5;
 
         positions[idx++] = x;
