@@ -15,14 +15,14 @@
     let listener, sound, audioLoader, analyser;
 
     function init() {
-        // Scene setup
+        // Create the scene
         scene = new THREE.Scene();
 
-        // Camera setup
+        // Set up the camera
         camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = 2;
 
-        // Renderer setup
+        // Set up the renderer
         renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
@@ -34,6 +34,7 @@
         audioLoader = new THREE.AudioLoader();
         analyser = new THREE.AudioAnalyser(sound, 32);
 
+        // Load and play the audio
         audioLoader.load('StanfordOutpatient3_piano.mp3', function(buffer) {
             sound.setBuffer(buffer);
             sound.setLoop(true);
@@ -70,27 +71,27 @@
             wireframe: true
         });
 
-        // Mesh creation
+        // Create the mesh and add it to the scene
         mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
-        // Handle window resizing
+        // Window resizing handling
         window.addEventListener('resize', onWindowResize, false);
 
-        // Start animation
+        // Start the animation loop
         animate();
     }
 
     function animate() {
         requestAnimationFrame(animate);
 
-        // Update audio data
+        // Update audio data if sound is playing
         if (sound.isPlaying) {
             analyser.getFrequencyData();
             mesh.material.uniforms.spectrum.value = analyser.data;
         }
 
-        // Update time uniform in shader
+        // Update the time uniform in the shader
         mesh.material.uniforms.time.value = clock.getElapsedTime();
 
         // Render the scene
