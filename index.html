@@ -64,7 +64,7 @@ function init() {
   audio = new THREE.Audio(listener);
   let audioLoader = new THREE.AudioLoader();
   // Load your MP3 (make sure it's in the same folder)
-  audioLoader.load('StanfordOutpatient3_piano.mp3', function(buffer){
+  audioLoader.load('StanfordOutpatient3piano.mp3', function(buffer){
     audio.setBuffer(buffer);
     audio.setLoop(true);
     // We'll only play after a user gesture, see startAudio() below
